@@ -1,4 +1,4 @@
-// Seven procedural, smooth-shaded cars. Bodies are extruded side profiles
+// Ten procedural, smooth-shaded cars. Bodies are extruded side profiles
 // with rounded bevels and real wheel arches; tyres are lathed with sidewalls;
 // glass, chrome and clear-coat paint use PBR materials. Every model is built
 // to the footprint in shared/vehicles.ts so what you see is what collides.
@@ -9,6 +9,7 @@ import {
   capsule, chrome, cone, cyl, darkTrim, geo, glass, glow, mesh, paint, rbox, rubber, seg, sphere, std, torus, tube,
 } from './kit';
 import { buildCharacter, type CharacterRig } from './characters';
+import { buildGun, type GunModel } from './guns';
 
 export interface CarParts {
   root: THREE.Group;
@@ -25,6 +26,20 @@ export interface CarParts {
   looseParts: THREE.Object3D[];
   exhaust: THREE.Vector3[];
   hood: THREE.Vector3;
+  gunMount: THREE.Group;
+  gun: GunModel | null;
+  topY: number; // roughly the highest point of the model (for name tags)
+}
+
+/** Swap the roof-mounted weapon model (e.g. after picking up a crate). */
+export function setCarGun(parts: CarParts, id: string) {
+  if (parts.gun?.id === id) return;
+  if (parts.gun) {
+    parts.gunMount.remove(parts.gun.group);
+    parts.gun.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material | undefined; m?.dispose(); });
+  }
+  parts.gun = id ? buildGun(id) : null;
+  if (parts.gun) parts.gunMount.add(parts.gun.group);
 }
 
 // ------------------------------------------------------------------ geometry builders
@@ -202,6 +217,9 @@ function trim(body: THREE.Object3D, zR: number, zF: number, archR: number, halfX
 interface Layout {
   R: number; W: number; track: number; zF: number; zR: number; rearR?: number; rearW?: number;
   seat: [number, number]; driverScale: number; exhaust: THREE.Vector3[]; hood: THREE.Vector3; chunky?: boolean; lift?: number;
+  zM?: number; // third (middle) axle
+  gun: [number, number]; // weapon mount [y, z]
+  top: number;
 }
 
 export function buildCar(app: Appearance): CarParts {
@@ -231,7 +249,7 @@ export function buildCar(app: Appearance): CarParts {
 
   switch (app.carClass) {
     case 'speedster': {
-      L = { R: 0.4, W: 0.32, track: 0.82, zF: 1.45, zR: -1.42, seat: [0.3, -0.25], driverScale: 0.78,
+      L = { R: 0.4, W: 0.32, track: 0.82, zF: 1.45, zR: -1.42, seat: [0.3, -0.25], driverScale: 0.78, gun: [1.3, -0.3], top: 1.6,
         exhaust: [new THREE.Vector3(0.28, 0.42, -2.35), new THREE.Vector3(-0.28, 0.42, -2.35)], hood: new THREE.Vector3(0, 0.75, 1.6) };
       body.add(mesh(sideExtrude('spd-low', lowerShape({ z0: -2.3, z1: 2.3, bottom: 0.16, axR: L.zR, axF: L.zF, archR: 0.47, wheelY: 0.4, nose: 0.36, hood: 0.62, cowlZ: 0.55, cowl: 0.74, deckZ: -1.3, deck: 0.82, tail: 0.86 }), 1.86, 0.14), main));
       const canopy = mesh(sideExtrude('spd-cab', cabinShape(0.75, 0.7, 0.05, -0.55, 1.3, -1.25, 0.8), 1.2, 0.22), gl);
@@ -265,7 +283,7 @@ export function buildCar(app: Appearance): CarParts {
       break;
     }
     case 'bruiser': {
-      L = { R: 0.58, W: 0.48, track: 0.98, zF: 1.42, zR: -1.42, seat: [1.0, -0.45], driverScale: 0.92, chunky: true,
+      L = { R: 0.58, W: 0.48, track: 0.98, zF: 1.42, zR: -1.42, seat: [1.0, -0.45], driverScale: 0.92, chunky: true, gun: [2.24, -0.5], top: 2.9,
         exhaust: [new THREE.Vector3(1.14, 2.1, -1.0), new THREE.Vector3(-1.14, 2.1, -1.0)], hood: new THREE.Vector3(0, 1.45, 1.5) };
       body.add(mesh(sideExtrude('bru-low', lowerShape({ z0: -2.2, z1: 2.2, bottom: 0.5, axR: L.zR, axF: L.zF, archR: 0.7, wheelY: 0.58, nose: 1.15, hood: 1.35, cowlZ: 0.5, cowl: 1.42, deckZ: -1.9, deck: 1.42, tail: 1.42, round: 0.22 }), 2.14, 0.16), main));
       body.add(mesh(rbox(2.18, 0.12, 4.3, 0.05), sec, 0, 1.0, 0));
@@ -302,7 +320,7 @@ export function buildCar(app: Appearance): CarParts {
       break;
     }
     case 'drifter': {
-      L = { R: 0.42, W: 0.36, track: 0.9, zF: 1.35, zR: -1.35, seat: [0.45, -0.3], driverScale: 0.84,
+      L = { R: 0.42, W: 0.36, track: 0.9, zF: 1.35, zR: -1.35, seat: [0.45, -0.3], driverScale: 0.84, gun: [1.55, -0.4], top: 2.1,
         exhaust: [new THREE.Vector3(0.55, 0.38, -2.2)], hood: new THREE.Vector3(0, 0.95, 1.45) };
       body.add(mesh(sideExtrude('dri-low', lowerShape({ z0: -2.15, z1: 2.15, bottom: 0.22, axR: L.zR, axF: L.zF, archR: 0.52, wheelY: 0.42, nose: 0.55, hood: 0.86, cowlZ: 0.55, cowl: 0.95, deckZ: -1.55, deck: 0.98, tail: 0.98 }), 1.92, 0.16), main));
       // wide fender flares
@@ -335,7 +353,7 @@ export function buildCar(app: Appearance): CarParts {
       break;
     }
     case 'muscle': {
-      L = { R: 0.43, W: 0.4, track: 0.86, zF: 1.55, zR: -1.4, seat: [0.42, -0.45], driverScale: 0.82,
+      L = { R: 0.43, W: 0.4, track: 0.86, zF: 1.55, zR: -1.4, seat: [0.42, -0.45], driverScale: 0.82, gun: [1.47, -0.6], top: 2.0,
         exhaust: [new THREE.Vector3(0.98, 0.32, -0.6), new THREE.Vector3(-0.98, 0.32, -0.6)], hood: new THREE.Vector3(0, 1.0, 1.6) };
       body.add(mesh(sideExtrude('mus-low', lowerShape({ z0: -2.4, z1: 2.4, bottom: 0.22, axR: L.zR, axF: L.zF, archR: 0.52, wheelY: 0.43, nose: 0.72, hood: 0.92, cowlZ: 0.3, cowl: 0.98, deckZ: -1.75, deck: 0.95, tail: 0.95, round: 0.12 }), 1.92, 0.12), main));
       body.add(mesh(sideExtrude('mus-cab', cabinShape(0.3, 0.95, -0.25, -0.95, 1.45, -1.85, 0.97), 1.5, 0.14), gl));
@@ -360,7 +378,7 @@ export function buildCar(app: Appearance): CarParts {
       break;
     }
     case 'buggy': {
-      L = { R: 0.42, W: 0.36, track: 0.94, zF: 1.25, zR: -1.2, rearR: 0.5, rearW: 0.44, seat: [0.5, -0.1], driverScale: 0.88, chunky: true,
+      L = { R: 0.42, W: 0.36, track: 0.94, zF: 1.25, zR: -1.2, rearR: 0.5, rearW: 0.44, seat: [0.5, -0.1], driverScale: 0.88, chunky: true, gun: [1.84, -0.3], top: 2.5,
         exhaust: [new THREE.Vector3(0.3, 1.0, -1.85)], hood: new THREE.Vector3(0, 0.9, -1.2) };
       // small tub
       body.add(mesh(sideExtrude('bug-tub', lowerShape({ z0: -1.6, z1: 1.75, bottom: 0.35, axR: L.zR, axF: L.zF, archR: 0.56, wheelY: 0.48, nose: 0.6, hood: 0.72, cowlZ: 0.5, cowl: 0.82, deckZ: -1.0, deck: 0.8, tail: 0.85, round: 0.2 }), 1.35, 0.14), main));
@@ -388,7 +406,7 @@ export function buildCar(app: Appearance): CarParts {
       break;
     }
     case 'formula': {
-      L = { R: 0.38, W: 0.42, track: 0.82, zF: 1.55, zR: -1.4, rearR: 0.42, rearW: 0.46, seat: [0.18, -0.3], driverScale: 0.8,
+      L = { R: 0.38, W: 0.42, track: 0.82, zF: 1.55, zR: -1.4, rearR: 0.42, rearW: 0.46, seat: [0.18, -0.3], driverScale: 0.8, gun: [0.98, -1.1], top: 1.7,
         exhaust: [new THREE.Vector3(0, 0.62, -2.15)], hood: new THREE.Vector3(0, 0.7, -0.9) };
       // tub & nose cone
       body.add(mesh(sideExtrude('f1-tub', () => {
@@ -428,9 +446,118 @@ export function buildCar(app: Appearance): CarParts {
       addDecals(0.37, 0.48, 1.1, 0.16);
       break;
     }
+    case 'jeep': {
+      L = { R: 0.5, W: 0.38, track: 0.94, zF: 1.35, zR: -1.3, seat: [0.82, -0.3], driverScale: 0.9, chunky: true, gun: [2.05, -0.95], top: 2.7,
+        exhaust: [new THREE.Vector3(0.62, 0.5, -2.12)], hood: new THREE.Vector3(0, 1.3, 1.4) };
+      body.add(mesh(sideExtrude('jeep-low', lowerShape({ z0: -2.1, z1: 2.1, bottom: 0.48, axR: L.zR, axF: L.zF, archR: 0.62, wheelY: 0.52, nose: 1.08, hood: 1.24, cowlZ: 0.42, cowl: 1.28, deckZ: -1.95, deck: 1.3, tail: 1.3, round: 0.1 }), 2.0, 0.1), main));
+      // square fender flares
+      for (const s of [-1, 1]) for (const z of [L.zF, L.zR]) body.add(mesh(rbox(0.22, 0.1, 1.35, 0.04), dark, s * 1.02, 1.08, z));
+      // fold-down windscreen frame
+      const ws = new THREE.Group();
+      ws.add(mesh(rbox(1.84, 0.62, 0.04, 0.02), gl, 0, 0.32, 0));
+      ws.add(mesh(rbox(1.92, 0.08, 0.08, 0.03), sec, 0, 0.66, 0));
+      for (const s of [-1, 1]) ws.add(mesh(rbox(0.08, 0.7, 0.08, 0.03), sec, s * 0.94, 0.33, 0));
+      ws.position.set(0, 1.28, 0.42);
+      ws.rotation.x = -0.18;
+      body.add(ws);
+      // roll bar
+      const rb = std('#2b2d38', 0.35, 0.8);
+      body.add(mesh(tube('jeep-roll', [[-0.92, 1.3, -0.95], [-0.88, 2.0, -0.95], [0, 2.05, -0.95], [0.88, 2.0, -0.95], [0.92, 1.3, -0.95]], 0.055), rb));
+      for (const s of [-1, 1]) body.add(mesh(tube(`jeep-stay${s}`, [[s * 0.88, 1.98, -0.95], [s * 0.9, 1.3, -1.85]], 0.04), rb));
+      // seven-slot grille + round lamps
+      body.add(mesh(rbox(1.3, 0.5, 0.06, 0.04), sec, 0, 0.86, 2.1));
+      for (let i = -3; i <= 3; i++) body.add(mesh(rbox(0.07, 0.36, 0.04, 0.02), dark, i * 0.13, 0.86, 2.13));
+      const bumper = mesh(rbox(2.0, 0.16, 0.18, 0.04), dark, 0, 0.55, 2.15);
+      body.add(bumper);
+      loose.push(bumper);
+      const spare = new THREE.Group();
+      spare.add(mesh(tireGeo(0.46, 0.3, true), tireMat).rotateY(Math.PI / 2));
+      spare.position.set(0, 1.0, -2.25);
+      body.add(spare);
+      loose.push(spare);
+      // jerry can, bonnet straps
+      body.add(mesh(rbox(0.3, 0.42, 0.18, 0.04), std('#3f6b35', 0.6, 0.2), 0.7, 1.5, -1.7));
+      for (const s of [-1, 1]) {
+        headlight(body, s * 0.78, 0.92, 2.12, 0.15);
+        taillight(body, s * 0.85, 1.0, -2.11, 0.2);
+        mirror(body, s * 1.0, 1.55, 0.55, sec);
+        body.add(mesh(rbox(0.06, 0.02, 0.6, 0.01), dark, s * 0.4, 1.27, 1.2));
+      }
+      trim(body, L.zR, L.zF, 0.62, 1.0, 0.56, 2.1, -2.1, dark);
+      addDecals(1.0, 0.95, -0.4, 0.28);
+      break;
+    }
+    case 'pickup': {
+      L = { R: 0.52, W: 0.4, track: 0.98, zF: 1.68, zR: -1.55, seat: [0.95, 0.4], driverScale: 0.88, chunky: true, gun: [1.6, -1.55], top: 2.8,
+        exhaust: [new THREE.Vector3(0.72, 0.45, -2.62)], hood: new THREE.Vector3(0, 1.45, 1.9) };
+      body.add(mesh(sideExtrude('pick-low', lowerShape({ z0: -2.6, z1: 2.6, bottom: 0.5, axR: L.zR, axF: L.zF, archR: 0.66, wheelY: 0.54, nose: 1.12, hood: 1.36, cowlZ: 1.0, cowl: 1.42, deckZ: -2.5, deck: 1.4, tail: 1.4, round: 0.12 }), 2.2, 0.12), main));
+      body.add(mesh(sideExtrude('pick-cab', cabinShape(1.0, 1.42, 0.62, -0.45, 2.18, -0.55, 1.42), 2.0, 0.12), gl));
+      body.add(mesh(sideExtrude('pick-roof', cabinShape(0.66, 2.08, 0.6, -0.42, 2.2, -0.48, 2.08), 2.02, 0.07), main));
+      body.add(mesh(rbox(2.08, 0.5, 0.1, 0.03), main, 0, 1.65, -0.5));
+      // bed: side walls, floor, tailgate
+      for (const s of [-1, 1]) body.add(mesh(rbox(0.1, 0.42, 2.0, 0.03), main, s * 1.04, 1.62, -1.55));
+      body.add(mesh(rbox(2.0, 0.06, 2.0, 0.02), dark, 0, 1.42, -1.55));
+      const gate = mesh(rbox(2.08, 0.44, 0.08, 0.03), sec, 0, 1.62, -2.56);
+      body.add(gate);
+      loose.push(gate);
+      // light bar on the roof
+      body.add(mesh(rbox(1.5, 0.12, 0.16, 0.05), dark, 0, 2.3, 0.2));
+      for (let i = -3; i <= 3; i++) body.add(mesh(rbox(0.16, 0.08, 0.02, 0.02), glow('#fff6c8', 1.4), i * 0.2, 2.3, 0.29, false));
+      // chrome grille & bumpers
+      body.add(mesh(rbox(1.7, 0.5, 0.06, 0.05), chrome(), 0, 1.0, 2.6));
+      for (let i = 0; i < 4; i++) body.add(mesh(rbox(1.5, 0.04, 0.04, 0.01), dark, 0, 0.84 + i * 0.1, 2.63));
+      const bF = mesh(rbox(2.15, 0.2, 0.2, 0.06), chrome(), 0, 0.6, 2.66);
+      const bR = mesh(rbox(2.15, 0.2, 0.2, 0.06), chrome(), 0, 0.6, -2.66);
+      body.add(bF, bR);
+      loose.push(bF, bR);
+      for (const s of [-1, 1]) {
+        headlight(body, s * 0.85, 1.12, 2.58, 0.16);
+        taillight(body, s * 0.98, 1.55, -2.6, 0.12);
+        mirror(body, s * 1.15, 1.75, 0.95, chrome());
+        body.add(mesh(rbox(0.08, 0.1, 1.5, 0.04), chrome(), s * 1.12, 0.62, 0.05));
+      }
+      trim(body, L.zR, L.zF, 0.66, 1.08, 0.58, 2.6, -2.6, dark);
+      addDecals(1.11, 1.0, 1.75, 0.26);
+      break;
+    }
+    case 'armored': {
+      L = { R: 0.55, W: 0.42, track: 1.08, zF: 1.85, zR: -1.85, zM: 0, seat: [1.62, 0.95], driverScale: 0.82, chunky: true, gun: [2.32, -0.55], top: 3.2,
+        exhaust: [new THREE.Vector3(1.15, 1.75, -1.9), new THREE.Vector3(-1.15, 1.75, -1.9)], hood: new THREE.Vector3(0, 2.05, 1.8) };
+      body.add(mesh(sideExtrude('arm-low', lowerShape({ z0: -2.75, z1: 2.75, bottom: 0.55, axR: L.zR, axF: L.zF, archR: 0.68, wheelY: 0.56, nose: 1.25, hood: 1.85, cowlZ: 1.25, cowl: 2.1, deckZ: -2.4, deck: 2.1, tail: 1.85, round: 0.08 }), 2.3, 0.08), main));
+      // sloped glacis plate and vision slits
+      const glacis = mesh(rbox(2.2, 0.08, 1.2, 0.03), sec, 0, 1.62, 2.18);
+      glacis.rotation.x = 0.55;
+      body.add(glacis);
+      for (const s of [-1, 0, 1]) body.add(mesh(rbox(0.36, 0.07, 0.05, 0.02), glow('#8fd8ff', 0.6), s * 0.55, 1.95, 1.55));
+      // side armour skirts over the upper wheels, with rivets
+      for (const s of [-1, 1]) {
+        body.add(mesh(rbox(0.08, 0.42, 5.1, 0.03), sec, s * 1.17, 1.3, 0));
+        for (let i = 0; i < 9; i++) body.add(mesh(sphere(0.03), chrome(), s * 1.22, 1.45, -2.3 + i * 0.58, false));
+      }
+      // roof: hatch, turret ring, antenna, stowage
+      body.add(mesh(cyl(0.62, 0.66, 0.16, 28), dark, 0, 2.18, -0.55));
+      body.add(mesh(cyl(0.34, 0.34, 0.08, 20), sec, 0, 2.14, 0.95));
+      const ant = mesh(cyl(0.012, 0.02, 1.6, 8), darkTrim(), -0.85, 2.9, -1.6);
+      body.add(ant);
+      loose.push(ant);
+      body.add(mesh(rbox(0.8, 0.3, 0.5, 0.06), std('#4d5a33', 0.7, 0.1), 0.55, 2.25, -1.8));
+      // headlight cages, tow hooks, exhaust stacks
+      for (const s of [-1, 1]) {
+        headlight(body, s * 0.85, 1.38, 2.62, 0.13);
+        body.add(mesh(torus(0.17, 0.02), darkTrim(), s * 0.85, 1.38, 2.72));
+        taillight(body, s * 0.85, 1.6, -2.76, 0.25);
+        body.add(mesh(torus(0.1, 0.03, Math.PI), chrome(), s * 0.6, 0.75, 2.78).rotateZ(Math.PI));
+        body.add(mesh(cyl(0.09, 0.09, 0.5), dark, s * 1.15, 1.5, -1.9));
+      }
+      const plow = mesh(rbox(2.3, 0.3, 0.12, 0.04), dark, 0, 0.72, 2.85);
+      body.add(plow);
+      loose.push(plow);
+      addDecals(1.22, 1.75, 0.6, 0.3);
+      break;
+    }
     default: {
       // monster truck
-      L = { R: 0.92, W: 0.66, track: 1.08, zF: 1.4, zR: -1.4, seat: [1.5, -0.25], driverScale: 0.95, chunky: true, lift: 1,
+      L = { R: 0.92, W: 0.66, track: 1.08, zF: 1.4, zR: -1.4, seat: [1.5, -0.25], driverScale: 0.95, chunky: true, lift: 1, gun: [2.76, -0.4], top: 3.5,
         exhaust: [new THREE.Vector3(0.75, 2.85, -0.75), new THREE.Vector3(-0.75, 2.85, -0.75)], hood: new THREE.Vector3(0, 2.0, 1.35) };
       body.add(mesh(sideExtrude('mon-low', lowerShape({ z0: -2.0, z1: 2.0, bottom: 1.2, axR: L.zR, axF: L.zF, archR: 1.0, wheelY: 1.18, nose: 1.8, hood: 1.98, cowlZ: 0.5, cowl: 2.05, deckZ: -1.7, deck: 2.0, tail: 2.0, round: 0.2 }), 2.1, 0.16), main));
       body.add(mesh(sideExtrude('mon-cab', cabinShape(0.45, 2.02, 0.1, -0.85, 2.72, -1.0, 2.02), 1.7, 0.14), gl));
@@ -468,7 +595,9 @@ export function buildCar(app: Appearance): CarParts {
   // Wheels
   const wheels: THREE.Group[] = [];
   const frontWheels: THREE.Group[] = [];
-  for (const [x, z, front] of [[1, L.zF, true], [-1, L.zF, true], [1, L.zR, false], [-1, L.zR, false]] as const) {
+  const axles: [number, number, boolean][] = [[1, L.zF, true], [-1, L.zF, true], [1, L.zR, false], [-1, L.zR, false]];
+  if (L.zM !== undefined) axles.push([1, L.zM, false], [-1, L.zM, false]);
+  for (const [x, z, front] of axles) {
     const R = front ? L.R : L.rearR ?? L.R;
     const W = front ? L.W : L.rearW ?? L.W;
     const w = wheel(app.wheelStyle, R, W, x, wheelMat, tireMat, dark, L.chunky);
@@ -511,7 +640,7 @@ export function buildCar(app: Appearance): CarParts {
     geo('shield', () => new THREE.SphereGeometry(1, seg(28), seg(18))),
     new THREE.MeshBasicMaterial({ color: '#7fe9ff', transparent: true, opacity: 0.22, depthWrite: false }),
   );
-  const height = (L.lift ? 3.0 : 1.6);
+  const height = Math.max(1.6, L.top * 0.85);
   shield.scale.set(cfg.halfWidth + 0.5, height * 0.75, cfg.halfLength + 0.5);
   shield.position.y = height * 0.5;
   shield.visible = false;
@@ -520,10 +649,16 @@ export function buildCar(app: Appearance): CarParts {
   root.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).receiveShadow = false;
   });
-  return {
+  const gunMount = new THREE.Group();
+  gunMount.position.set(0, L.gun[0], L.gun[1]);
+  tilt.add(gunMount);
+  const parts: CarParts = {
     root, tilt, body, wheels, frontWheels, wheelRadius: L.R, flames, shield, driverSeat, rig,
     mats: { main, sec, wheel: wheelMat, dark }, looseParts: loose, exhaust: L.exhaust, hood: L.hood,
+    gunMount, gun: null, topY: L.top,
   };
+  if (app.weapon) setCarGun(parts, app.weapon);
+  return parts;
 }
 
 export function disposeCar(parts: CarParts) {

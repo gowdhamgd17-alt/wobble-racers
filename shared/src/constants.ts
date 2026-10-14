@@ -16,7 +16,10 @@ export const DEFAULT_LAPS = 3;
 export const COUNTDOWN_SECONDS = 3;
 export const RECONNECT_GRACE_SECONDS = 20;
 
-export const MAX_HEALTH = 100;
+/** Fallback max health; every vehicle class has its own (see vehicles.ts). */
+export const MAX_HEALTH = 400;
+/** Crash / landing / wall damage scale (health pools are ~4x the old 100). */
+export const IMPACT_DAMAGE_SCALE = 2.5;
 
 export const PHYS = {
   gravity: 20,
@@ -60,9 +63,25 @@ export const WEAPON = {
 
 export const RESPAWN = {
   destroyedSeconds: 1.6,
+  battleDestroyedSeconds: 3,
   protectionSeconds: 2,
   safeClearance: 6.5, // centre-to-centre, longer than the longest car
 } as const;
+
+export const PICKUP = {
+  radius: 1.8, // added to the car's half width
+  repairFraction: 0.5, // share of max health restored
+  repairRespawn: 8,
+  crateRespawn: 12,
+  crateMagazines: 3,
+  raceSpacing: 170, // metres between pickup clusters on race tracks
+} as const;
+
+export const KILL_CREDIT_SECONDS = 8;
+export const KILL_TARGETS = [5, 10, 15, 20, 30] as const;
+export const TIME_LIMITS = [0, 3, 5, 10] as const; // minutes, 0 = no limit
+export type GameMode = 'race' | 'battle';
+export const GAME_MODES: GameMode[] = ['race', 'battle'];
 
 export const INPUT_LIMITS = {
   maxPerSecond: 45, // client sends 30/s; allow jitter bursts

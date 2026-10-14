@@ -5,6 +5,10 @@ import { DEFAULT_APPEARANCE, DEFAULT_SETTINGS, MAX_HEALTH, NITRO, Phase, RacerSt
 // Schema accessors installed by defineTypes are never shadowed.
 
 export class SettingsState extends Schema {
+  declare mode: string;
+  declare arenaId: string;
+  declare killTarget: number;
+  declare timeLimit: number;
   declare layout: string;
   declare trackId: string;
   declare distanceKm: number;
@@ -20,6 +24,7 @@ export class SettingsState extends Schema {
   }
 }
 defineTypes(SettingsState, {
+  mode: 'string', arenaId: 'string', killTarget: 'uint8', timeLimit: 'uint8',
   layout: 'string', trackId: 'string', distanceKm: 'float32', laps: 'uint8', collisions: 'boolean', damage: 'boolean',
   weapons: 'boolean', nitro: 'boolean', drift: 'boolean',
 });
@@ -34,6 +39,7 @@ export class PlayerState extends Schema {
   declare colorSecondary: string;
   declare colorWheel: string;
   declare wheelStyle: string;
+  declare weapon: string;
   declare ready: boolean;
   declare isHost: boolean;
   declare connected: boolean;
@@ -51,6 +57,12 @@ export class PlayerState extends Schema {
   declare drifting: boolean;
   // combat
   declare health: number;
+  declare maxHealth: number;
+  declare curWeapon: string;
+  declare ammo: number;
+  declare reloadT: number;
+  declare kills: number;
+  declare deaths: number;
   declare nitro: number;
   declare fireCd: number;
   declare protectT: number;
@@ -83,6 +95,12 @@ export class PlayerState extends Schema {
     this.boosting = false;
     this.drifting = false;
     this.health = MAX_HEALTH;
+    this.maxHealth = MAX_HEALTH;
+    this.curWeapon = this.weapon;
+    this.ammo = 0;
+    this.reloadT = 0;
+    this.kills = 0;
+    this.deaths = 0;
     this.nitro = NITRO.start;
     this.fireCd = 0;
     this.protectT = 0;
@@ -99,30 +117,46 @@ export class PlayerState extends Schema {
 defineTypes(PlayerState, {
   id: 'string', name: 'string', tag: 'string',
   carClass: 'string', character: 'string', colorMain: 'string', colorSecondary: 'string',
-  colorWheel: 'string', wheelStyle: 'string',
+  colorWheel: 'string', wheelStyle: 'string', weapon: 'string',
   ready: 'boolean', isHost: 'boolean', connected: 'boolean', status: 'string',
   x: 'float32', y: 'float32', z: 'float32', vx: 'float32', vy: 'float32', vz: 'float32',
   yaw: 'float32', yawRate: 'float32', pitch: 'float32', roll: 'float32', pitchRate: 'float32', rollRate: 'float32',
   grounded: 'boolean', overturnT: 'float32', rampVy: 'float32', padCooldown: 'float32',
   boosting: 'boolean', drifting: 'boolean',
-  health: 'float32', nitro: 'float32', fireCd: 'float32', protectT: 'float32', respawnT: 'float32',
+  health: 'float32', maxHealth: 'uint16', curWeapon: 'string', ammo: 'uint8', reloadT: 'float32',
+  kills: 'uint16', deaths: 'uint16', nitro: 'float32', fireCd: 'float32', protectT: 'float32', respawnT: 'float32',
   laps: 'uint8', nextCp: 'uint8', progress: 'float32', rank: 'uint8', finishPlace: 'uint8',
   ackSeq: 'uint32', joinOrder: 'uint16',
 });
 
 export class ProjectileState extends Schema {
   declare owner: string;
+  declare kind: string;
   declare x: number; declare y: number; declare z: number;
-  declare vx: number; declare vz: number;
+  declare vx: number; declare vy: number; declare vz: number;
   constructor() {
     super();
     this.owner = '';
-    this.x = this.y = this.z = this.vx = this.vz = 0;
+    this.kind = '';
+    this.x = this.y = this.z = this.vx = this.vy = this.vz = 0;
   }
 }
 defineTypes(ProjectileState, {
-  owner: 'string', x: 'float32', y: 'float32', z: 'float32', vx: 'float32', vz: 'float32',
+  owner: 'string', kind: 'string', x: 'float32', y: 'float32', z: 'float32', vx: 'float32', vy: 'float32', vz: 'float32',
 });
+
+export class PickupState extends Schema {
+  declare kind: string;
+  declare x: number; declare y: number; declare z: number;
+  declare active: boolean;
+  constructor() {
+    super();
+    this.kind = 'repair';
+    this.x = this.y = this.z = 0;
+    this.active = true;
+  }
+}
+defineTypes(PickupState, { kind: 'string', x: 'float32', y: 'float32', z: 'float32', active: 'boolean' });
 
 export class RaceState extends Schema {
   declare phase: string;
@@ -136,6 +170,8 @@ export class RaceState extends Schema {
   declare settings: SettingsState;
   declare players: MapSchema<PlayerState>;
   declare projectiles: MapSchema<ProjectileState>;
+  declare pickups: MapSchema<PickupState>;
+  declare timeLeft: number;
   declare finishOrder: ArraySchema<string>;
   constructor() {
     super();
@@ -150,6 +186,8 @@ export class RaceState extends Schema {
     this.settings = new SettingsState();
     this.players = new MapSchema<PlayerState>();
     this.projectiles = new MapSchema<ProjectileState>();
+    this.pickups = new MapSchema<PickupState>();
+    this.timeLeft = 0;
     this.finishOrder = new ArraySchema<string>();
   }
 }
@@ -159,5 +197,7 @@ defineTypes(RaceState, {
   settings: SettingsState,
   players: { map: PlayerState },
   projectiles: { map: ProjectileState },
+  pickups: { map: PickupState },
+  timeLeft: 'float32',
   finishOrder: ['string'],
 });

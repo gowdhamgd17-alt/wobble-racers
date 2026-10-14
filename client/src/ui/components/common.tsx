@@ -89,11 +89,11 @@ export function PreviewBox({ appearance, label, focus = 'car' }: { appearance: A
 
 export function Thumb({ appearance, alt }: { appearance: Appearance; alt: string }) {
   const [src, setSrc] = useState('');
-  const key = [appearance.carClass, appearance.character, appearance.colorMain, appearance.colorSecondary, appearance.colorWheel, appearance.wheelStyle].join('|');
+  const key = [appearance.carClass, appearance.character, appearance.colorMain, appearance.colorSecondary, appearance.colorWheel, appearance.wheelStyle, appearance.weapon].join('|');
   useEffect(() => {
     let alive = true;
     // Render off the critical path
-    const a: Appearance = { carClass: appearance.carClass, character: appearance.character, colorMain: appearance.colorMain, colorSecondary: appearance.colorSecondary, colorWheel: appearance.colorWheel, wheelStyle: appearance.wheelStyle };
+    const a: Appearance = { carClass: appearance.carClass, character: appearance.character, colorMain: appearance.colorMain, colorSecondary: appearance.colorSecondary, colorWheel: appearance.colorWheel, wheelStyle: appearance.wheelStyle, weapon: appearance.weapon };
     const id = requestAnimationFrame(() => { if (alive) setSrc(webglAvailable() ? carThumbnail(a) : ''); });
     return () => { alive = false; cancelAnimationFrame(id); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

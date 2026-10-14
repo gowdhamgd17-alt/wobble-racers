@@ -12,6 +12,14 @@ import { NITRO, PHYS } from './constants';
 import type { Track } from './track';
 import { pointAt, queryTrack } from './track';
 import type { VehicleConfig } from './vehicles';
+import type { Arena } from './arena';
+import { arenaOnRoad, arenaRay, arenaSpotClear } from './arena';
+
+/** Anything a car can drive in: a race track or the battle arena. */
+export type World = Track | Arena;
+export function isArena(w: World): w is Arena {
+  return (w as Arena).kind === 'arena';
+}
 
 export interface InputState {
   steer: number; // -1 (left) .. +1 (right)
@@ -21,6 +29,7 @@ export interface InputState {
   nitro: boolean;
   fire: boolean;
   recover: boolean;
+  reload?: boolean;
 }
 
 export const NEUTRAL_INPUT: InputState = Object.freeze({
@@ -90,6 +99,7 @@ export function sanitizeInput(raw: unknown): InputState | null {
     nitro: r.nitro === true,
     fire: r.fire === true,
     recover: r.recover === true,
+    reload: r.reload === true,
   };
 }
 
@@ -111,10 +121,12 @@ export function stepVehicle(
   s: VehicleState,
   input: InputState,
   cfg: VehicleConfig,
-  track: Track,
+  world: World,
   rules: Rules,
   dt: number,
 ): StepEvents {
+  const arena = isArena(world) ? world : null;
+  const track = arena ? null : (world as Track);
   const ev = EVENTS;
   ev.landingSpeed = 0;
   ev.wallImpact = 0;
@@ -125,9 +137,11 @@ export function stepVehicle(
   s.recoverCooldown = Math.max(0, s.recoverCooldown - dt);
   s.padCooldown = Math.max(0, s.padCooldown - dt);
 
-  const q0 = queryTrack(track, s.x, s.z, s.trackIdx);
-  s.trackIdx = q0.index;
-  const onRoad = q0.onRoad;
+  const q0 = track ? queryTrack(track, s.x, s.z, s.trackIdx) : null;
+  if (q0) s.trackIdx = q0.index;
+  const onRoad = q0 ? q0.onRoad : arenaOnRoad(arena!, s.x, s.z);
+  // Arena grass is rough but very drivable.
+  const offroad = arena ? Math.max(cfg.offroadSpeed, 0.82) : cfg.offroadSpeed;
 
   // Nitro activation (hysteresis so it doesn't flicker at empty)
   const wantBoost = rules.nitro && input.nitro && s.overturnT <= 0;
@@ -177,7 +191,7 @@ export function stepVehicle(
     vF = s.vx * fx + s.vz * fz;
     let vL = s.vx * rx + s.vz * rz;
 
-    const top = cfg.maxSpeed * (s.boosting ? cfg.nitroMultiplier : 1) * (onRoad ? 1 : cfg.offroadSpeed);
+    const top = cfg.maxSpeed * (s.boosting ? cfg.nitroMultiplier : 1) * (onRoad ? 1 : offroad);
     if (input.throttle > 0) {
       if (vF < -0.5) vF += cfg.brakeDecel * input.throttle * dt;
       else vF += cfg.acceleration * input.throttle * Math.max(0, 1 - vF / top) * dt;
@@ -188,7 +202,7 @@ export function stepVehicle(
       else vF = Math.max(-cfg.reverseSpeed, vF - cfg.acceleration * 0.6 * input.brake * dt);
     }
     // Rolling resistance / coasting
-    vF -= vF * (0.12 + (onRoad ? 0 : 1.1 * (1 - cfg.offroadSpeed) / 0.45)) * dt;
+    vF -= vF * (0.12 + (onRoad ? 0 : 1.1 * (1 - offroad) / 0.45)) * dt;
     if (input.throttle === 0 && input.brake === 0) vF -= Math.sign(vF) * Math.min(Math.abs(vF), 3 * dt);
     if (input.handbrake) vF -= vF * (s.drifting ? 0.35 : 1.4) * dt;
     if (vF > top) vF -= (vF - top) * 1.5 * dt;
@@ -208,7 +222,7 @@ export function stepVehicle(
     s.vz = fz * vF + rz * vL;
 
     // Boost pads
-    if (rules.nitro && s.padCooldown <= 0) {
+    if (track && q0 && rules.nitro && s.padCooldown <= 0) {
       for (const p of track.pads) {
         let d = q0.f - p.index;
         if (track.closed) {
@@ -258,14 +272,19 @@ export function stepVehicle(
   s.z += s.vz * dt;
   if (!s.grounded) s.y += s.vy * dt;
 
-  const wall = constrainToTrack(s, cfg, track);
+  const wall = constrainToWorld(s, cfg, world);
   if (wall > 0) ev.wallImpact = wall;
-  const q = queryTrack(track, s.x, s.z, s.trackIdx);
-  s.trackIdx = q.index;
+  let groundH = 0, outside = false;
+  if (track) {
+    const q = queryTrack(track, s.x, s.z, s.trackIdx);
+    s.trackIdx = q.index;
+    groundH = q.height;
+    outside = Math.abs(q.lateral) > track.halfWidth + PHYS.barrierInset + 0.5;
+  }
 
   // Ground contact
   if (s.grounded) {
-    const h = q.height;
+    const h = groundH;
     if (h >= s.y - 0.35) {
       s.rampVy = (h - yOld) / dt;
       s.y = h;
@@ -277,9 +296,9 @@ export function stepVehicle(
       s.pitchRate = 0.4;
       ev.launched = true;
     }
-  } else if (s.y <= q.height && s.vy <= 0) {
+  } else if (s.y <= groundH && s.vy <= 0) {
     const impact = -s.vy;
-    s.y = q.height;
+    s.y = groundH;
     s.vy = 0;
     s.grounded = true;
     s.rampVy = 0;
@@ -304,7 +323,6 @@ export function stepVehicle(
   }
 
   // Recovery triggers
-  const outside = Math.abs(q.lateral) > track.halfWidth + PHYS.barrierInset + 0.5;
   if (outside && s.grounded) s.offTrackT += dt;
   else s.offTrackT = 0;
 
@@ -469,6 +487,144 @@ export function segmentHitsCar(
 }
 
 const CORNERS: number[] = [];
+
+/** Keep a car inside whatever world it is in. Returns the wall impact speed. */
+export function constrainToWorld(s: VehicleState, cfg: VehicleConfig, world: World): number {
+  return isArena(world) ? constrainToArena(s, cfg, world) : constrainToTrack(s, cfg, world);
+}
+
+/**
+ * Arena: push the car's real footprint out of houses (boxes), trees and rocks
+ * (circles) and the boundary wall, bouncing its velocity off the surface.
+ */
+export function constrainToArena(s: VehicleState, cfg: VehicleConfig, a: Arena): number {
+  let impact = 0;
+  const reach = Math.hypot(cfg.halfLength, cfg.halfWidth);
+  const bounce = (nx: number, nz: number) => {
+    // n points from the obstacle towards the car
+    const vn = -(s.vx * nx + s.vz * nz);
+    if (vn > 0) {
+      s.vx += nx * vn * 1.3;
+      s.vz += nz * vn * 1.3;
+      s.vx *= 0.92;
+      s.vz *= 0.92;
+      s.yawRate *= 0.6;
+      impact = Math.max(impact, vn);
+    }
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    let moved = false;
+    for (const o of a.obstacles) {
+      if (s.y > o.h + 0.2) continue;
+      const dx = s.x - o.x, dz = s.z - o.z;
+      if (dx * dx + dz * dz > (o.br + reach) ** 2) continue;
+      if (o.shape === 'box') {
+        const ov = obbOverlap(s.x, s.z, s.yaw, cfg.halfLength, cfg.halfWidth, o.x, o.z, o.yaw, o.hl, o.hw);
+        if (!ov) continue;
+        s.x -= ov.nx * (ov.depth + 0.01);
+        s.z -= ov.nz * (ov.depth + 0.01);
+        bounce(-ov.nx, -ov.nz);
+        moved = true;
+      } else {
+        // closest point of the car rectangle to the circle centre
+        const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw);
+        const lx = -dx * -fz + -dz * fx, ly = -dx * fx + -dz * fz; // circle centre in car space
+        const cxl = clamp(lx, -cfg.halfWidth, cfg.halfWidth), cyl = clamp(ly, -cfg.halfLength, cfg.halfLength);
+        const ex = lx - cxl, ey = ly - cyl;
+        const d = Math.hypot(ex, ey);
+        let nx: number, nz: number, depth: number;
+        if (d > 1e-6) {
+          if (d >= o.r) continue;
+          // world-space direction from the circle centre towards the closest point
+          const wx = -(ex * -fz + ey * fx) / d, wz = -(ex * fx + ey * fz) / d;
+          nx = wx; nz = wz; depth = o.r - d;
+        } else {
+          const l = Math.hypot(dx, dz) || 1;
+          nx = dx / l; nz = dz / l; depth = o.r + Math.min(cfg.halfWidth, cfg.halfLength);
+        }
+        s.x += nx * (depth + 0.01);
+        s.z += nz * (depth + 0.01);
+        bounce(nx, nz);
+        moved = true;
+      }
+    }
+    // Boundary wall
+    carCorners(s.x, s.z, s.yaw, cfg.halfLength, cfg.halfWidth, CORNERS);
+    for (let axis = 0; axis < 2; axis++) {
+      let maxOver = 0, minOver = 0;
+      for (let i = axis; i < 8; i += 2) {
+        maxOver = Math.max(maxOver, CORNERS[i] - a.half);
+        minOver = Math.min(minOver, CORNERS[i] + a.half);
+      }
+      if (maxOver > 0 || minOver < 0) {
+        const push = maxOver > 0 ? -maxOver : -minOver;
+        if (axis === 0) s.x += push; else s.z += push;
+        const n = Math.sign(push);
+        bounce(axis === 0 ? n : 0, axis === 0 ? 0 : n);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return impact;
+}
+
+/** Nearest clear spot to (x,z) in the arena, preferring spawn points when crowded. */
+export function findArenaSpot(a: Arena, x: number, z: number, yaw: number, occupied: { x: number; z: number }[], clearance: number) {
+  const free = (px: number, pz: number) =>
+    arenaSpotClear(a, px, pz, 3.2) && occupied.every((c) => (c.x - px) ** 2 + (c.z - pz) ** 2 >= clearance * clearance);
+  for (const r of [0, 4, 8, 12, 18]) {
+    for (let k = 0; k < (r === 0 ? 1 : 8); k++) {
+      const ang = (k / 8) * Math.PI * 2;
+      const px = x + Math.cos(ang) * r, pz = z + Math.sin(ang) * r;
+      if (free(px, pz)) return { x: px, z: pz, yaw };
+    }
+  }
+  let best = a.spawns[0], bestD = Infinity;
+  for (const sp of a.spawns) {
+    const d = (sp.x - x) ** 2 + (sp.z - z) ** 2;
+    if (d < bestD && free(sp.x, sp.z)) { bestD = d; best = sp; }
+  }
+  return { x: best.x, z: best.z, yaw: best.yaw };
+}
+
+/** Place a car at an arena position, at rest. */
+export function placeInArena(s: VehicleState, x: number, z: number, yaw: number) {
+  s.x = x; s.z = z; s.y = 0;
+  s.vx = s.vy = s.vz = 0;
+  s.yaw = yaw;
+  s.yawRate = s.pitch = s.roll = s.pitchRate = s.rollRate = 0;
+  s.grounded = true;
+  s.overturnT = 0;
+  s.offTrackT = 0;
+  s.rampVy = 0;
+  s.drifting = false;
+  s.boosting = false;
+  s.trackIdx = -1;
+  s.recoverCooldown = PHYS.manualRecoverCooldown;
+}
+
+/**
+ * Where a shot from (x0,z0) to (x1,z1) at height y is stopped by the world
+ * (barriers / obstacles / walls). Returns the fraction along the segment.
+ */
+export function worldRay(world: World, x0: number, z0: number, x1: number, z1: number, y: number, hint = -1): number {
+  if (isArena(world)) return arenaRay(world, x0, z0, x1, z1, y);
+  const track = world;
+  if (y > PHYS.barrierHeight + 1.2 + 2.5) return 1;
+  const len = Math.hypot(x1 - x0, z1 - z0);
+  const steps = Math.max(1, Math.ceil(len / 3));
+  let idx = hint;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const q = queryTrack(track, x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, idx);
+    idx = q.index;
+    const wallY = PHYS.barrierHeight + 1.2 + Math.max(0, q.height);
+    if (Math.abs(q.lateral) > track.halfWidth + PHYS.barrierInset && y < wallY) return Math.max(0, t - 0.5 / steps);
+    if (!track.closed && (q.f < 0 || q.f > track.n - 1)) return t;
+  }
+  return 1;
+}
 
 /**
  * Keep the whole car footprint inside the barriers (and inside the end walls

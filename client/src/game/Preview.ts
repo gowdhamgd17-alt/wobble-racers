@@ -173,7 +173,7 @@ const thumbCam = new THREE.PerspectiveCamera(30, 4 / 3, 0.1, 100);
 const thumbCache = new Map<string, string>();
 
 export function carThumbnail(app: Appearance): string {
-  const key = [app.carClass, app.character, app.colorMain, app.colorSecondary, app.colorWheel, app.wheelStyle].join('|');
+  const key = [app.carClass, app.character, app.colorMain, app.colorSecondary, app.colorWheel, app.wheelStyle, app.weapon].join('|');
   const hit = thumbCache.get(key);
   if (hit) return hit;
   try {

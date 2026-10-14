@@ -7,7 +7,7 @@ import { settingsStore, type Action } from '../state/store';
 
 export type InputMethod = 'keyboard' | 'touch';
 
-const TOUCH_ACTIONS: Action[] = ['accelerate', 'brake', 'left', 'right', 'drift', 'nitro', 'fire', 'recover'];
+const TOUCH_ACTIONS: Action[] = ['accelerate', 'brake', 'left', 'right', 'drift', 'nitro', 'fire', 'reload', 'recover'];
 
 class InputManager {
   private keys = new Set<string>();
@@ -120,7 +120,7 @@ class InputManager {
   sample(dt: number, out: InputState): InputState {
     if (!this.enabled) {
       out.steer = 0; out.throttle = 0; out.brake = 0;
-      out.handbrake = out.nitro = out.fire = out.recover = false;
+      out.handbrake = out.nitro = out.fire = out.recover = out.reload = false;
       return out;
     }
     const left = this.isDown('left'), right = this.isDown('right');
@@ -137,6 +137,7 @@ class InputManager {
     out.nitro = this.isDown('nitro');
     out.fire = this.isDown('fire');
     out.recover = this.isDown('recover');
+    out.reload = this.isDown('reload');
     return out;
   }
 

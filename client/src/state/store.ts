@@ -35,7 +35,7 @@ export function useStore<T extends object>(store: { get: () => T; subscribe: (l:
 
 export type ControlMode = 'auto' | 'touch' | 'keyboard';
 export type Quality = 'auto' | 'low' | 'medium' | 'high';
-export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'recover' | 'pause';
+export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'reload' | 'recover' | 'pause';
 
 export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   accelerate: ['KeyW', 'ArrowUp'],
@@ -45,6 +45,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   drift: ['Space'],
   nitro: ['ShiftLeft', 'ShiftRight'],
   fire: ['KeyF', 'KeyJ'],
+  reload: ['KeyR', 'KeyQ'],
   recover: ['KeyR'],
   pause: ['Escape', 'KeyP'],
 };

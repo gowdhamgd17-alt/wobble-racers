@@ -183,7 +183,8 @@ describe('authoritative race rules', () => {
     await sleep(200);
     const r = sr._racer(host.room.sessionId)!;
     expect(r.state.laps).toBe(0);
-    expect(r.state.health).toBe(100);
+    expect(r.state.health).toBe(r.state.maxHealth);
+    expect(r.state.maxHealth).toBe(380);
     expect(r.state.carClass).toBe('drifter'); // appearance locked during race
     expect(r.rejectedInputs).toBeGreaterThanOrEqual(2);
     await leaveAll();
@@ -207,19 +208,19 @@ describe('authoritative race rules', () => {
     r.prog.laps = 1;
     r.prog.nextCp = 4;
     const deathX = r.veh.x, deathZ = r.veh.z;
-    sr.damage(r, 1000, 'test');
+    sr.damage(r, 100000, 'test');
     expect(r.state.status).toBe(RacerStatus.DESTROYED);
     // Repeated damage in the same frame does nothing (no double destroy)
-    sr.damage(r, 1000, 'test');
+    sr.damage(r, 100000, 'test');
     await until(() => r.state.status === RacerStatus.RACING, 4000);
-    expect(r.state.health).toBe(100);
+    expect(r.state.health).toBe(r.state.maxHealth);
     expect(r.prog.laps).toBe(1);
     expect(r.prog.nextCp).toBe(4);
     expect(Math.hypot(r.veh.x - deathX, r.veh.z - deathZ)).toBeLessThan(25);
     expect(r.state.protectT).toBeGreaterThan(0);
     // Spawn protection blocks immediate re-destruction
-    sr.damage(r, 1000, 'test');
-    expect(r.state.health).toBe(100);
+    sr.damage(r, 100000, 'test');
+    expect(r.state.health).toBe(r.state.maxHealth);
     expect(r.state.status).toBe(RacerStatus.RACING);
     await leaveAll();
   });
@@ -230,7 +231,7 @@ describe('authoritative race rules', () => {
     const b = sr._racer(guests[0].room.sessionId)!;
     const track = getTrack(sr.state.settings);
     placeOnTrack(a.veh, track, 300, 0);
-    sr.damage(a, 1000, 'test');
+    sr.damage(a, 100000, 'test');
     placeOnTrack(b.veh, track, 300, 0); // park B on the death spot
     await until(() => a.state.status === RacerStatus.RACING, 4000);
     expect(Math.hypot(a.veh.x - b.veh.x, a.veh.z - b.veh.z)).toBeGreaterThan(4);
@@ -247,10 +248,11 @@ describe('authoritative race rules', () => {
     a.state.protectT = 0; b.state.protectT = 0;
     let seq = 1000;
     const firing = setInterval(() => host.room.send(MSG.INPUT, encodeInput(seq++, { ...NEUTRAL_INPUT, fire: true })), 33);
-    await until(() => b.state.health < 100, 3000);
+    await until(() => b.state.health < b.state.maxHealth, 3000);
     clearInterval(firing);
-    expect(b.state.health).toBeLessThanOrEqual(80);
-    expect(a.state.health).toBe(100);
+    expect(b.state.health).toBeLessThanOrEqual(b.state.maxHealth - 15);
+    expect(a.state.health).toBe(a.state.maxHealth);
+    expect(a.state.ammo).toBeLessThan(30);
     await leaveAll();
   });
 
@@ -346,6 +348,38 @@ describe('authoritative race rules', () => {
     await until(() => sr.state.players.get(id)?.status === RacerStatus.RACING);
     expect(sr.state.players.size).toBe(2);
     void host;
+    await leaveAll();
+  });
+});
+
+describe('battleground mode', () => {
+  it('runs a battle: arena spawns, pickups, kill credit and SAAVU kill events, ends at the kill target', async () => {
+    const l = await lobby(2);
+    l.host.room.send(MSG.SETTINGS, { mode: 'battle', killTarget: 5, timeLimit: 3 });
+    await until(() => l.host.room.state.settings.mode === 'battle');
+    l.guests[0].room.send(MSG.READY, { ready: true });
+    await sleep(150);
+    const kills: { killer: string; victim: string; weapon: string }[] = [];
+    l.guests[0].room.onMessage(MSG.KILL, (list: typeof kills) => kills.push(...list));
+    l.host.room.send(MSG.START);
+    await until(() => l.host.room.state.phase === Phase.RACING, 6000);
+    const sr = serverRoom(l.code);
+    expect(sr.state.pickups.size).toBeGreaterThan(5);
+    expect(sr.state.timeLeft).toBeGreaterThan(170);
+    const a = sr._racer(l.host.room.sessionId)!;
+    const b = sr._racer(l.guests[0].room.sessionId)!;
+    // B is shot to pieces by A five times
+    for (let i = 0; i < 5; i++) {
+      await until(() => b.state.status === RacerStatus.RACING, 5000);
+      b.state.protectT = 0;
+      sr.damage(b, 100000, 'rocket', a.sessionId);
+    }
+    await until(() => l.host.room.state.phase === Phase.RESULTS, 3000);
+    expect(a.state.kills).toBe(5);
+    expect(b.state.deaths).toBe(5);
+    expect([...sr.state.finishOrder][0]).toBe(a.sessionId);
+    await until(() => kills.length >= 5, 2000);
+    expect(kills[0]).toEqual({ killer: a.sessionId, victim: b.sessionId, weapon: 'rocket' });
     await leaveAll();
   });
 });

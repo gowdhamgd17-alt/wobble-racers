@@ -1,6 +1,6 @@
 import { Client, Room } from 'colyseus.js';
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_SETTINGS, MSG, ROOM_NAME, sanitizeSettings, type Appearance, type FxMessage, type RaceSettings } from '@wobble/shared';
+import { DEFAULT_SETTINGS, MSG, ROOM_NAME, sanitizeSettings, type Appearance, type FxMessage, type KillEvent, type RaceSettings } from '@wobble/shared';
 import { LocalRoom } from './LocalRoom';
 
 export function serverUrls() {
@@ -23,6 +23,9 @@ export interface PlayerSnap {
   colorSecondary: string;
   colorWheel: string;
   wheelStyle: string;
+  weapon: string;
+  kills: number;
+  deaths: number;
   ready: boolean;
   isHost: boolean;
   connected: boolean;
@@ -117,6 +120,8 @@ class NetSession {
   };
   getVersion = () => this.version;
   onFx(l: (fx: FxMessage[]) => void) { this.fxListeners.add(l); return () => { this.fxListeners.delete(l); }; }
+  private killListeners = new Set<(k: KillEvent[]) => void>();
+  onKill(l: (k: KillEvent[]) => void) { this.killListeners.add(l); return () => { this.killListeners.delete(l); }; }
   onServerError(l: (e: { code: string; message: string }) => void) { this.errorListeners.add(l); return () => { this.errorListeners.delete(l); }; }
   /** Fires on every state patch (used by the game loop, not React). */
   onPatch(l: () => void) { this.patchListeners.add(l); return () => { this.patchListeners.delete(l); }; }
@@ -149,6 +154,7 @@ class NetSession {
       this.queueNotify();
     });
     room.onMessage(MSG.FX, (list: FxMessage[]) => this.fxListeners.forEach((l) => l(list)));
+    room.onMessage(MSG.KILL, (list: KillEvent[]) => this.killListeners.forEach((l) => l(list)));
     room.onMessage(MSG.ERROR, (e: { code: string; message: string }) => this.errorListeners.forEach((l) => l(e)));
     room.onMessage(MSG.WELCOME, () => {});
     room.onLeave((code) => this.handleLeave(room, code));
@@ -274,6 +280,7 @@ function buildSnap(s: any): RoomSnap {
     players.push({
       id: p.id, name: p.name, tag: p.tag, carClass: p.carClass, character: p.character,
       colorMain: p.colorMain, colorSecondary: p.colorSecondary, colorWheel: p.colorWheel, wheelStyle: p.wheelStyle,
+      weapon: p.weapon, kills: p.kills ?? 0, deaths: p.deaths ?? 0,
       ready: p.ready, isHost: p.isHost, connected: p.connected, status: p.status, health: p.health,
       laps: p.laps, rank: p.rank, finishPlace: p.finishPlace, joinOrder: p.joinOrder,
     });
@@ -283,7 +290,7 @@ function buildSnap(s: any): RoomSnap {
   return {
     phase: s.phase, roomName: s.roomName, code: s.code, isPrivate: s.isPrivate, maxPlayers: s.maxPlayers,
     hostId: s.hostId, countdown: s.countdown, raceId: s.raceId,
-    settings: { layout: st.layout, trackId: st.trackId, distanceKm: st.distanceKm, laps: st.laps, collisions: st.collisions, damage: st.damage, weapons: st.weapons, nitro: st.nitro, drift: st.drift },
+    settings: { mode: st.mode ?? 'race', arenaId: st.arenaId ?? 'town', killTarget: st.killTarget ?? 10, timeLimit: st.timeLimit ?? 5, layout: st.layout, trackId: st.trackId, distanceKm: st.distanceKm, laps: st.laps, collisions: st.collisions, damage: st.damage, weapons: st.weapons, nitro: st.nitro, drift: st.drift },
     players,
     finishOrder: s.finishOrder ? [...s.finishOrder] : [],
   };

@@ -1,7 +1,9 @@
-import { DEFAULT_LAPS, LAP_OPTIONS, MAX_PLAYERS, MIN_PLAYERS_TO_START, NAME_MAX_LENGTH, ROOM_NAME_MAX_LENGTH } from './constants';
+import { DEFAULT_LAPS, GAME_MODES, KILL_TARGETS, LAP_OPTIONS, TIME_LIMITS, MAX_PLAYERS, MIN_PLAYERS_TO_START, NAME_MAX_LENGTH, ROOM_NAME_MAX_LENGTH } from './constants';
 import { CHARACTER_IDS, COLOR_IDS, WHEEL_STYLE_IDS } from './cosmetics';
 import { DEFAULT_KM, KM_OPTIONS, normalizeSpec } from './track';
 import { CAR_CLASS_IDS } from './vehicles';
+import { WEAPON_IDS } from './weapons';
+import { ARENA_IDS } from './arena';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -32,6 +34,10 @@ export function validateRoomName(raw: unknown, fallback: string): string {
 }
 
 export interface RaceSettings {
+  mode: string; // 'race' | 'battle'
+  arenaId: string;
+  killTarget: number;
+  timeLimit: number; // minutes, 0 = none
   layout: string; // 'loop' | 'straight'
   trackId: string;
   distanceKm: number; // lap length (loop) or sprint length (straight)
@@ -44,6 +50,10 @@ export interface RaceSettings {
 }
 
 export const DEFAULT_SETTINGS: RaceSettings = {
+  mode: 'race',
+  arenaId: 'town',
+  killTarget: 10,
+  timeLimit: 5,
   layout: 'loop',
   trackId: 'valley',
   distanceKm: DEFAULT_KM,
@@ -70,6 +80,10 @@ export function sanitizeSettings(raw: unknown, base: RaceSettings = DEFAULT_SETT
   out.layout = spec.layout;
   out.trackId = spec.trackId;
   out.distanceKm = spec.distanceKm;
+  if (typeof r.mode === 'string' && (GAME_MODES as string[]).includes(r.mode)) out.mode = r.mode;
+  if (typeof r.arenaId === 'string' && ARENA_IDS.includes(r.arenaId)) out.arenaId = r.arenaId;
+  if (typeof r.killTarget === 'number' && (KILL_TARGETS as readonly number[]).includes(r.killTarget)) out.killTarget = r.killTarget;
+  if (typeof r.timeLimit === 'number' && (TIME_LIMITS as readonly number[]).includes(r.timeLimit)) out.timeLimit = r.timeLimit;
   if (typeof r.laps === 'number' && (LAP_OPTIONS as readonly number[]).includes(r.laps)) out.laps = r.laps;
   for (const k of ['collisions', 'damage', 'weapons', 'nitro', 'drift'] as const) {
     if (typeof r[k] === 'boolean') out[k] = r[k] as boolean;
@@ -89,6 +103,7 @@ export interface Appearance {
   colorSecondary: string;
   colorWheel: string;
   wheelStyle: string;
+  weapon: string;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
@@ -98,6 +113,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
   colorSecondary: 'white',
   colorWheel: 'black',
   wheelStyle: 'classic',
+  weapon: 'm4',
 };
 
 export function sanitizeAppearance(raw: unknown, base: Appearance = DEFAULT_APPEARANCE): Appearance {
@@ -113,5 +129,6 @@ export function sanitizeAppearance(raw: unknown, base: Appearance = DEFAULT_APPE
   pick('colorSecondary', COLOR_IDS);
   pick('colorWheel', COLOR_IDS);
   pick('wheelStyle', WHEEL_STYLE_IDS);
+  pick('weapon', WEAPON_IDS);
   return out;
 }

@@ -1,44 +1,20 @@
 import { Client, Room, ServerError } from '@colyseus/core';
 import {
-  COUNTDOWN_SECONDS, INPUT_LIMITS, MAX_HEALTH, MIN_PLAYERS_TO_START, MSG, NEUTRAL_INPUT, NITRO, PHYS, Phase,
-  RECONNECT_GRACE_SECONDS, RESPAWN, RacerStatus, SIM_DT, SIM_HZ, PATCH_RATE_MS, WEAPON,
-  constrainToTrack, createVehicleState, decodeInput, findSafeSpot, getTrack, getVehicle, initialProgress, placeOnTrack,
-  segmentHitsCar, totalLapsFor, trackName,
-  progressScore, queryTrack, resolveCarCollision, sanitizeAppearance, sanitizeMaxPlayers, sanitizeSettings,
-  stepVehicle, updateProgress, validateDisplayName, validateRoomName,
-  type FxMessage, type FxType, type InputState, type ProgressState, type Track, type VehicleState,
+  GameSim, INPUT_LIMITS, MIN_PLAYERS_TO_START, MSG, NEUTRAL_INPUT, Phase,
+  RECONNECT_GRACE_SECONDS, RESPAWN, RacerStatus, SIM_HZ, SIM_DT, PATCH_RATE_MS,
+  createSimRacer, decodeInput, sanitizeAppearance, sanitizeMaxPlayers, sanitizeSettings, validateDisplayName, validateRoomName,
+  worldName, type FxType, type RaceSettings, type SimPlayer, type SimRacer,
 } from '@wobble/shared';
-import { PlayerState, ProjectileState, RaceState } from './schema';
+import { PickupState, PlayerState, ProjectileState, RaceState } from './schema';
 import { allocateCode, releaseCode } from './codes';
 
-interface Racer {
+type Racer = SimRacer & {
   sessionId: string;
   state: PlayerState;
-  veh: VehicleState;
-  prog: ProgressState;
-  input: InputState;
-  queue: { seq: number; input: InputState }[];
   inputTokens: number;
   actionTokens: number;
   rejectedInputs: number;
-  destroyedT: number;
-  deathF: number;
-  deathLat: number;
-  deathYaw: number;
-  lastRank: number;
-  overtakeCd: number;
-  prevFire: boolean;
-}
-
-interface Projectile {
-  id: string;
-  owner: string;
-  x: number; y: number; z: number;
-  vx: number; vz: number;
-  life: number;
-  idx: number; // track sample hint
-  state: ProjectileState;
-}
+};
 
 export interface CreateOptions {
   roomName?: string;
@@ -52,12 +28,8 @@ const LOBBY_PHASES: string[] = [Phase.WAITING_FOR_PLAYERS, Phase.LOBBY];
 
 export class RaceRoom extends Room<RaceState> {
   racers = new Map<string, Racer>();
-  projectiles: Projectile[] = [];
-  track!: Track;
-  pairCooldown = new Map<string, number>();
-  fxQueue: FxMessage[] = [];
+  sim!: GameSim<Racer>;
   joinCounter = 0;
-  projCounter = 0;
 
   async onCreate(options: CreateOptions) {
     this.roomId = allocateCode();
@@ -70,7 +42,8 @@ export class RaceRoom extends Room<RaceState> {
     Object.assign(state.settings, sanitizeSettings(options.settings));
     this.setState(state);
     this.maxClients = state.maxPlayers;
-    this.track = getTrack(state.settings);
+    this.sim = new GameSim<Racer>(state.settings as unknown as RaceSettings);
+    this.sim.racers = this.racers;
     if (state.isPrivate) await this.setPrivate(true);
     this.setPatchRate(PATCH_RATE_MS);
     this.updateMetadata();
@@ -84,7 +57,7 @@ export class RaceRoom extends Room<RaceState> {
     this.onMessage(MSG.TO_LOBBY, (client) => this.action(client, () => this.handleBackToLobby(client, false)));
     this.onMessage(MSG.EMOTE, (client) => this.action(client, () => {
       const r = this.racers.get(client.sessionId);
-      if (r) this.fx('wave', r.sessionId, r.veh.x, r.veh.y, r.veh.z, 0);
+      if (r) this.sim.fx('wave', r.sessionId, r.veh.x, r.veh.y, r.veh.z, 0);
     }));
     this.onMessage('*', (client) => this.sendError(client, 'bad_message', 'Unknown message.'));
 
@@ -183,12 +156,10 @@ export class RaceRoom extends Room<RaceState> {
   }
 
   private makeRacer(id: string, state: PlayerState): Racer {
-    return {
-      sessionId: id, state, veh: createVehicleState(0, 0, 0), prog: initialProgress(this.track),
-      input: { ...NEUTRAL_INPUT }, queue: [], inputTokens: INPUT_LIMITS.maxPerSecond, actionTokens: 10,
-      rejectedInputs: 0, destroyedT: 0, deathF: 0, deathLat: 0, deathYaw: 0, lastRank: 0, overtakeCd: 0,
-      prevFire: false,
-    };
+    const base = createSimRacer(id, state as unknown as SimPlayer, false, state.joinOrder);
+    return Object.assign(base, {
+      sessionId: id, state, inputTokens: INPUT_LIMITS.maxPerSecond, actionTokens: 10, rejectedInputs: 0,
+    });
   }
 
   // ---------------------------------------------------------------- helpers
@@ -231,7 +202,8 @@ export class RaceRoom extends Room<RaceState> {
       name: this.state.roomName,
       code: this.state.code,
       phase: this.state.phase,
-      track: trackName(this.state.settings),
+      track: worldName(this.state.settings),
+      mode: this.state.settings.mode,
       laps: this.state.settings.laps,
       isPrivate: this.state.isPrivate,
       players: this.connectedCount(),
@@ -252,7 +224,7 @@ export class RaceRoom extends Room<RaceState> {
   }
 
   private fx(type: FxType, id: string, x: number, y: number, z: number, amount: number) {
-    this.fxQueue.push([type, id, +x.toFixed(2), +y.toFixed(2), +z.toFixed(2), +amount.toFixed(2)]);
+    this.sim.fx(type, id, x, y, z, amount);
   }
 
   // ---------------------------------------------------------------- lobby messages
@@ -270,8 +242,9 @@ export class RaceRoom extends Room<RaceState> {
     if (!p) return;
     Object.assign(p, sanitizeAppearance(raw, {
       carClass: p.carClass, character: p.character, colorMain: p.colorMain,
-      colorSecondary: p.colorSecondary, colorWheel: p.colorWheel, wheelStyle: p.wheelStyle,
+      colorSecondary: p.colorSecondary, colorWheel: p.colorWheel, wheelStyle: p.wheelStyle, weapon: p.weapon,
     }));
+    p.curWeapon = p.weapon;
   }
 
   handleSettings(client: Client, raw: unknown) {
@@ -279,13 +252,13 @@ export class RaceRoom extends Room<RaceState> {
     if (!LOBBY_PHASES.includes(this.state.phase)) return this.sendError(client, 'locked', 'Settings are locked during a race.');
     const s = this.state.settings;
     Object.assign(s, sanitizeSettings(raw, {
+      mode: s.mode, arenaId: s.arenaId, killTarget: s.killTarget, timeLimit: s.timeLimit,
       layout: s.layout, trackId: s.trackId, distanceKm: s.distanceKm, laps: s.laps, collisions: s.collisions, damage: s.damage,
       weapons: s.weapons, nitro: s.nitro, drift: s.drift,
     }));
     if (raw && typeof raw === 'object' && 'roomName' in raw) {
       this.state.roomName = validateRoomName((raw as { roomName: unknown }).roomName, this.state.roomName);
     }
-    this.track = getTrack(s);
     // Changing the rules un-readies everyone so nobody is surprised.
     this.state.players.forEach((p) => { if (p.id !== this.state.hostId) p.ready = false; });
     this.updateMetadata();
@@ -314,36 +287,21 @@ export class RaceRoom extends Room<RaceState> {
     for (const [id, r] of [...this.racers]) {
       if (!r.state.connected) { this.racers.delete(id); this.state.players.delete(id); }
     }
-    this.track = getTrack(this.state.settings);
     this.state.raceId += 1;
     this.state.finishOrder.clear();
-    this.projectiles.forEach((p) => this.state.projectiles.delete(p.id));
-    this.projectiles = [];
-    this.pairCooldown.clear();
+    this.state.projectiles.clear();
+    this.state.pickups.clear();
     const order = [...this.racers.values()].sort((a, b) => a.state.joinOrder - b.state.joinOrder);
-    order.forEach((r, i) => {
-      const g = this.track.grid[i % this.track.grid.length];
-      r.veh = createVehicleState(g.x, g.z, g.yaw);
-      r.veh.nitro = this.state.settings.nitro ? NITRO.start : 0;
-      r.prog = initialProgress(this.track);
-      r.queue.length = 0;
-      r.input = { ...NEUTRAL_INPUT };
-      r.destroyedT = 0;
-      r.lastRank = i + 1;
-      const s = r.state;
-      s.status = RacerStatus.RACING;
-      s.health = MAX_HEALTH;
-      s.fireCd = 0;
-      s.protectT = 0;
-      s.respawnT = 0;
-      s.laps = 0;
-      s.nextCp = 1;
-      s.finishPlace = 0;
-      s.rank = i + 1;
-      s.ready = false;
-      this.syncVehicle(r);
-    });
-    this.state.countdown = COUNTDOWN_SECONDS;
+    for (const r of order) r.state.ready = false;
+    this.sim.settings = this.state.settings as unknown as RaceSettings;
+    this.sim.begin(order);
+    for (const pk of this.sim.pickups) {
+      const ps = new PickupState();
+      ps.kind = pk.kind; ps.x = pk.x; ps.y = pk.y; ps.z = pk.z; ps.active = pk.active;
+      this.state.pickups.set(pk.id, ps);
+    }
+    this.state.countdown = this.sim.countdown;
+    this.state.timeLeft = this.sim.timeLeft;
     this.state.phase = Phase.COUNTDOWN;
     this.updateMetadata();
   }
@@ -369,8 +327,9 @@ export class RaceRoom extends Room<RaceState> {
     });
     const me = this.state.players.get(client.sessionId);
     if (me && rematch) me.ready = true;
-    this.projectiles.forEach((p) => this.state.projectiles.delete(p.id));
-    this.projectiles = [];
+    this.state.projectiles.clear();
+    this.sim.projectiles = [];
+    this.sim.phase = Phase.LOBBY;
     this.state.phase = Phase.WAITING_FOR_PLAYERS;
     if (!this.state.players.get(this.state.hostId)) this.reassignHost();
     this.refreshLobbyPhase();
@@ -397,311 +356,70 @@ export class RaceRoom extends Room<RaceState> {
 
   tick(dtMs: number) {
     void dtMs; // fixed timestep for determinism
-    const dt = SIM_DT;
-    if (this.state.phase === Phase.COUNTDOWN) {
-      this.state.countdown = Math.max(0, this.state.countdown - dt);
-      // Consume inputs (ack them) but keep cars on the grid.
-      for (const r of this.racers.values()) {
-        const next = r.queue.shift();
-        if (next) r.state.ackSeq = next.seq;
-        r.queue.length = 0;
-      }
-      if (this.state.countdown <= 0) {
-        this.state.phase = Phase.RACING;
-        this.updateMetadata();
-      }
-    } else if (this.state.phase === Phase.RACING) {
-      this.simulate(dt);
+    const before = this.state.phase;
+    if (this.state.phase === Phase.COUNTDOWN || this.state.phase === Phase.RACING) {
+      this.sim.settings = this.state.settings as unknown as RaceSettings;
+      this.sim.tick(SIM_DT);
+      this.publishSim();
     }
-    if (this.fxQueue.length) {
-      this.broadcast(MSG.FX, this.fxQueue);
-      this.fxQueue = [];
+    if (this.state.phase !== before) this.updateMetadata();
+    if (this.sim.fxOut.length) {
+      this.broadcast(MSG.FX, this.sim.fxOut);
+      this.sim.fxOut = [];
+    }
+    if (this.sim.killsOut.length) {
+      this.broadcast(MSG.KILL, this.sim.killsOut);
+      this.sim.killsOut = [];
     }
   }
 
-  private simulate(dt: number) {
-    const settings = this.state.settings;
-    const rules = { nitro: settings.nitro, drift: settings.drift };
-    for (const [k, v] of this.pairCooldown) {
-      if (v - dt <= 0) this.pairCooldown.delete(k);
-      else this.pairCooldown.set(k, v - dt);
+  /** Mirror the simulation's shared objects into the synced schema. */
+  private publishSim() {
+    const st = this.state, sim = this.sim;
+    st.countdown = sim.countdown;
+    st.timeLeft = sim.timeLeft;
+    st.phase = sim.phase;
+    for (let i = st.finishOrder.length; i < sim.finishOrder.length; i++) st.finishOrder.push(sim.finishOrder[i]);
+    if (sim.phase === Phase.RESULTS && sim.battle) {
+      st.finishOrder.clear();
+      sim.finishOrder.forEach((id) => st.finishOrder.push(id));
     }
-
-    for (const r of this.racers.values()) {
-      const s = r.state;
-      // Pull exactly one queued input per tick (client sends one per tick).
-      const next = r.queue.shift();
-      if (next) { r.input = next.input; s.ackSeq = next.seq; }
-      if (!s.connected || s.status === RacerStatus.LEFT || s.status === RacerStatus.DISCONNECTED) {
-        r.input = { ...NEUTRAL_INPUT };
+    const live = new Set<string>();
+    for (const pr of sim.projectiles) {
+      live.add(pr.id);
+      let ps = st.projectiles.get(pr.id);
+      if (!ps) {
+        ps = new ProjectileState();
+        ps.owner = pr.owner;
+        ps.kind = pr.kind;
+        st.projectiles.set(pr.id, ps);
       }
-      s.fireCd = Math.max(0, s.fireCd - dt);
-      s.protectT = Math.max(0, s.protectT - dt);
-      r.overtakeCd = Math.max(0, r.overtakeCd - dt);
-
-      if (s.status === RacerStatus.DESTROYED) {
-        r.destroyedT -= dt;
-        s.respawnT = Math.max(0, r.destroyedT);
-        if (r.destroyedT <= 0) this.respawn(r);
-        continue;
-      }
-      if (s.status === RacerStatus.LEFT) continue;
-
-      const cfg = getVehicle(s.carClass);
-      const input = s.status === RacerStatus.DISCONNECTED ? NEUTRAL_INPUT : r.input;
-      const ev = stepVehicle(r.veh, input, cfg, this.track, rules, dt);
-      const v = r.veh;
-
-      if (ev.boostPad) this.fx('pad', r.sessionId, v.x, v.y, v.z, 0);
-      if (ev.landingSpeed > PHYS.landingDamageSpeed) {
-        this.damage(r, (ev.landingSpeed - PHYS.landingDamageSpeed) * 2.5 / cfg.damageResistance, 'land');
-      } else if (ev.landingSpeed > 6) {
-        this.fx('land', r.sessionId, v.x, v.y, v.z, ev.landingSpeed);
-      }
-      if (ev.wallImpact > PHYS.wallDamageSpeed) {
-        this.damage(r, (ev.wallImpact - PHYS.wallDamageSpeed) * 0.8 / cfg.damageResistance, 'wall');
-      }
-      if (ev.recover) this.recover(r);
-
-      // Firing (edge or held: limited by cooldown)
-      if (input.fire && settings.weapons && s.status === RacerStatus.RACING && s.fireCd <= 0) this.fire(r);
-
-      // Lap progress (authoritative)
-      if (s.status === RacerStatus.RACING) {
-        const q = queryTrack(this.track, v.x, v.z, v.trackIdx);
-        const pe = updateProgress(this.track, r.prog, q.f, q.lateral, totalLapsFor(this.track, settings.laps));
-        if (pe === 'lap') this.fx('lap', r.sessionId, v.x, v.y, v.z, r.prog.laps);
-        if (pe === 'finish') this.finish(r);
-        s.progress = progressScore(this.track, r.prog, q.f);
-      }
-      s.laps = r.prog.laps;
-      s.nextCp = r.prog.nextCp;
+      ps.x = pr.x; ps.y = pr.y; ps.z = pr.z; ps.vx = pr.vx; ps.vy = pr.vy; ps.vz = pr.vz;
     }
-
-    if (settings.collisions) {
-      // Two passes so piles of cars fully separate; then walls win over car pushes.
-      this.collideCars();
-      this.collideCars();
-      for (const r of this.racers.values()) {
-        if (this.canCollide(r)) constrainToTrack(r.veh, getVehicle(r.state.carClass), this.track);
-      }
-    }
-    this.stepProjectiles(dt);
-    this.updateRanks();
-    for (const r of this.racers.values()) this.syncVehicle(r);
-    this.checkRaceComplete();
-  }
-
-  /** Racing cars are solid, including spawn-protected ones (they just take no damage). */
-  private canCollide(r: Racer) {
-    return r.state.status === RacerStatus.RACING;
-  }
-
-  private collideCars() {
-    const list = [...this.racers.values()].filter((r) => this.canCollide(r));
-    for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        const a = list[i], b = list[j];
-        const res = resolveCarCollision(a.veh, b.veh, getVehicle(a.state.carClass), getVehicle(b.state.carClass));
-        if (!res.hit) continue;
-        const key = a.sessionId < b.sessionId ? a.sessionId + '|' + b.sessionId : b.sessionId + '|' + a.sessionId;
-        if (this.pairCooldown.has(key)) continue; // physical push still applied, no repeat damage
-        this.pairCooldown.set(key, PHYS.collisionPairCooldown);
-        if (res.closingSpeed > 4) {
-          this.fx('crash', a.sessionId, (a.veh.x + b.veh.x) / 2, (a.veh.y + b.veh.y) / 2 + 0.6, (a.veh.z + b.veh.z) / 2, res.closingSpeed);
-        }
-        if (res.damageA > 0) this.damage(a, res.damageA, 'crash');
-        if (res.damageB > 0) this.damage(b, res.damageB, 'crash');
-      }
+    for (const id of [...st.projectiles.keys()]) if (!live.has(id)) st.projectiles.delete(id);
+    for (const pk of sim.pickups) {
+      const ps = st.pickups.get(pk.id);
+      if (ps && ps.active !== pk.active) ps.active = pk.active;
     }
   }
 
-  private fire(r: Racer) {
-    const mine = this.projectiles.filter((p) => p.owner === r.sessionId).length;
-    if (mine >= WEAPON.maxProjectilesPerPlayer) return;
-    r.state.fireCd = WEAPON.cooldown;
-    const v = r.veh;
-    const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
-    const fwdSpeed = Math.max(0, v.vx * fx + v.vz * fz);
-    const id = 'p' + this.projCounter++;
-    const proj: Projectile = {
-      id, owner: r.sessionId,
-      x: v.x + fx * (getVehicle(r.state.carClass).halfLength + 0.6), y: v.y + 0.8, z: v.z + fz * (getVehicle(r.state.carClass).halfLength + 0.6),
-      vx: fx * (WEAPON.projectileSpeed + fwdSpeed), vz: fz * (WEAPON.projectileSpeed + fwdSpeed),
-      life: WEAPON.lifetime, idx: v.trackIdx, state: new ProjectileState(),
-    };
-    proj.state.owner = r.sessionId;
-    this.projectiles.push(proj);
-    this.writeProjectile(proj);
-    this.state.projectiles.set(id, proj.state);
-    this.fx('shoot', r.sessionId, proj.x, proj.y, proj.z, 0);
-  }
-
-  private writeProjectile(p: Projectile) {
-    p.state.x = p.x; p.state.y = p.y; p.state.z = p.z; p.state.vx = p.vx; p.state.vz = p.vz;
-  }
-
-  private stepProjectiles(dt: number) {
-    const keep: Projectile[] = [];
-    for (const p of this.projectiles) {
-      const x0 = p.x, z0 = p.z;
-      p.x += p.vx * dt;
-      p.z += p.vz * dt;
-      p.life -= dt;
-      let hit: Racer | null = null;
-      let bestT = 2;
-      // Swept segment vs each eligible car's real footprint
-      for (const r of this.racers.values()) {
-        if (r.sessionId === p.owner || r.state.status !== RacerStatus.RACING || r.state.protectT > 0) continue;
-        const v = r.veh;
-        if (Math.abs(v.y + 0.6 - p.y) > 2.2) continue;
-        const cfg = getVehicle(r.state.carClass);
-        const t = segmentHitsCar(x0, z0, p.x, p.z, PHYS.projectileRadius, v.x, v.z, v.yaw, cfg.halfLength, cfg.halfWidth);
-        if (t >= 0 && t < bestT) { bestT = t; hit = r; }
-      }
-      // Projectiles stop at barriers
-      const q = queryTrack(this.track, p.x, p.z, p.idx);
-      p.idx = q.index;
-      const hitWall = Math.abs(q.lateral) > this.track.halfWidth + PHYS.barrierInset && p.y < PHYS.barrierHeight + 1.2;
-      if (hit) {
-        const v = hit.veh;
-        const l = Math.hypot(p.vx, p.vz) || 1;
-        v.vx += (p.vx / l) * WEAPON.knockback;
-        v.vz += (p.vz / l) * WEAPON.knockback;
-        if (v.grounded && v.overturnT <= 0) { v.grounded = false; v.vy = WEAPON.knockUp; v.rollRate = 1.5; }
-        this.fx('hit', hit.sessionId, v.x, v.y + 0.8, v.z, WEAPON.damage);
-        this.damage(hit, WEAPON.damage / getVehicle(hit.state.carClass).damageResistance, 'shot', p.owner);
-        this.state.projectiles.delete(p.id);
-      } else if (p.life <= 0 || hitWall) {
-        this.state.projectiles.delete(p.id);
-      } else {
-        this.writeProjectile(p);
-        keep.push(p);
-      }
-    }
-    this.projectiles = keep;
-  }
-
-  /** The only path by which health changes. */
-  damage(r: Racer, amount: number, _cause: string, _by?: string) {
-    const s = r.state;
-    if (!this.state.settings.damage) return;
-    if (s.status !== RacerStatus.RACING || s.protectT > 0 || s.health <= 0) return;
-    if (!(amount > 0)) return;
-    s.health = Math.max(0, s.health - amount);
-    if (s.health <= 0) this.destroy(r);
-  }
-
-  private destroy(r: Racer) {
-    const s = r.state;
-    const v = r.veh;
-    const q = queryTrack(this.track, v.x, v.z, v.trackIdx);
-    r.deathF = q.f;
-    r.deathLat = q.lateral;
-    r.deathYaw = v.yaw;
-    r.destroyedT = RESPAWN.destroyedSeconds;
-    s.respawnT = RESPAWN.destroyedSeconds;
-    s.status = RacerStatus.DESTROYED;
-    s.health = 0;
-    this.fx('explode', r.sessionId, v.x, v.y + 0.5, v.z, 0);
-    v.vx = v.vy = v.vz = 0;
-    v.boosting = false;
-    v.drifting = false;
-  }
-
-  private occupiedExcept(r: Racer) {
-    const out: { x: number; z: number }[] = [];
-    for (const o of this.racers.values()) {
-      if (o === r) continue;
-      if (o.state.status === RacerStatus.RACING || o.state.status === RacerStatus.DISCONNECTED) out.push({ x: o.veh.x, z: o.veh.z });
-    }
-    return out;
+  /** The only path by which health changes (delegates to the shared simulation). */
+  damage(r: Racer, amount: number, cause: string, by?: string) {
+    this.sim.settings = this.state.settings as unknown as RaceSettings;
+    this.sim.damage(r, amount, cause, by);
+    this.publishSim();
   }
 
   respawn(r: Racer) {
-    const spot = findSafeSpot(this.track, r.deathF, r.deathLat, this.occupiedExcept(r), RESPAWN.safeClearance);
-    const nitro = r.veh.nitro;
-    placeOnTrack(r.veh, this.track, spot.f, spot.lateral, r.deathYaw);
-    r.veh.nitro = nitro;
-    r.veh.recoverCooldown = 0;
-    const s = r.state;
-    s.health = MAX_HEALTH;
-    s.protectT = RESPAWN.protectionSeconds;
-    s.respawnT = 0;
-    s.status = r.prog.finished ? RacerStatus.FINISHED : RacerStatus.RACING;
-    this.fx('respawn', r.sessionId, r.veh.x, r.veh.y, r.veh.z, 0);
-  }
-
-  private recover(r: Racer) {
-    const q = queryTrack(this.track, r.veh.x, r.veh.z);
-    const spot = findSafeSpot(this.track, q.f, q.lateral, this.occupiedExcept(r), RESPAWN.safeClearance);
-    const nitro = r.veh.nitro;
-    placeOnTrack(r.veh, this.track, spot.f, spot.lateral, r.veh.yaw);
-    r.veh.nitro = nitro;
-    r.state.protectT = Math.max(r.state.protectT, 1);
-    this.fx('respawn', r.sessionId, r.veh.x, r.veh.y, r.veh.z, 1);
-  }
-
-  private finish(r: Racer) {
-    if (this.state.finishOrder.includes(r.sessionId)) return; // never twice
-    this.state.finishOrder.push(r.sessionId);
-    r.state.finishPlace = this.state.finishOrder.length;
-    r.state.status = RacerStatus.FINISHED;
-    r.state.protectT = 0;
-    this.fx('finish', r.sessionId, r.veh.x, r.veh.y, r.veh.z, r.state.finishPlace);
-  }
-
-  private updateRanks() {
-    const list = [...this.racers.values()].filter((r) => r.state.status !== RacerStatus.LEFT);
-    list.sort((a, b) => {
-      const fa = a.state.finishPlace || 999, fb = b.state.finishPlace || 999;
-      if (fa !== fb) return fa - fb;
-      return b.state.progress - a.state.progress;
-    });
-    list.forEach((r, i) => {
-      const rank = i + 1;
-      if (rank < r.lastRank && r.state.status === RacerStatus.RACING && r.overtakeCd <= 0 && this.state.phase === Phase.RACING) {
-        this.fx('overtake', r.sessionId, r.veh.x, r.veh.y, r.veh.z, rank);
-        r.overtakeCd = 3;
-      }
-      r.lastRank = rank;
-      r.state.rank = rank;
-    });
-    // Left players rank after everyone else
-    let n = list.length;
-    for (const r of this.racers.values()) if (r.state.status === RacerStatus.LEFT) r.state.rank = ++n;
+    this.sim.respawn(r);
+    this.sim.sync(r);
   }
 
   checkRaceComplete() {
     if (this.state.phase !== Phase.RACING) return;
-    let active = 0;
-    let connected = 0;
-    for (const r of this.racers.values()) {
-      const st = r.state.status;
-      if (st === RacerStatus.RACING || st === RacerStatus.DESTROYED || st === RacerStatus.DISCONNECTED) active++;
-      if (r.state.connected) connected++;
-    }
-    if (active === 0 || connected === 0) {
-      this.state.phase = Phase.RESULTS;
-      this.projectiles.forEach((p) => this.state.projectiles.delete(p.id));
-      this.projectiles = [];
-      this.updateMetadata();
-    }
-  }
-
-  private syncVehicle(r: Racer) {
-    const s = r.state, v = r.veh;
-    s.x = v.x; s.y = v.y; s.z = v.z;
-    s.vx = v.vx; s.vy = v.vy; s.vz = v.vz;
-    s.yaw = v.yaw; s.yawRate = v.yawRate;
-    s.pitch = v.pitch; s.roll = v.roll; s.pitchRate = v.pitchRate; s.rollRate = v.rollRate;
-    s.grounded = v.grounded;
-    s.overturnT = v.overturnT;
-    s.rampVy = v.rampVy;
-    s.padCooldown = v.padCooldown;
-    s.boosting = v.boosting;
-    s.drifting = v.drifting;
-    s.nitro = v.nitro;
+    this.sim.checkComplete();
+    this.publishSim();
+    if (this.state.phase !== Phase.RACING) this.updateMetadata();
   }
 
   // Test / debugging hooks (server-side only; never reachable from clients)

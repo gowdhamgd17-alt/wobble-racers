@@ -154,7 +154,7 @@ describe('vehicle controller', () => {
     expect(getVehicle('speedster').maxSpeed).toBeGreaterThan(getVehicle('bruiser').maxSpeed);
     expect(getVehicle('drifter').driftGrip).toBeLessThan(getVehicle('bruiser').driftGrip);
     expect(getVehicle('buggy').offroadSpeed).toBeGreaterThan(getVehicle('formula').offroadSpeed);
-    expect(CAR_CLASS_IDS.length).toBe(7);
+    expect(CAR_CLASS_IDS.length).toBe(10);
   });
 
   it('drifting reduces grip and builds nitro', () => {
