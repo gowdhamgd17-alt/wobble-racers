@@ -1,0 +1,15 @@
+# Netlify hosts only the website. The game server must run elsewhere (e.g. Render, see render.yaml).
+# In Netlify: Site settings -> Environment variables -> add
+#   VITE_SERVER_URL = wss://<your-render-service>.onrender.com
+# then trigger a new deploy so the address is baked into the build.
+[build]
+  command = "npm ci && npm run build -w client"
+  publish = "client/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

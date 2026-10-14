@@ -1,0 +1,15 @@
+# One-click deploy on Render (https://render.com): Dashboard -> New -> Blueprint -> pick this repo.
+# Runs the game server and serves the built website from the same URL (WebSockets supported).
+services:
+  - type: web
+    name: wobble-racers
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: cd server && node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: STATIC_DIR
+        value: ../client/dist

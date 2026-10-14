@@ -1,0 +1,20 @@
+{
+  "name": "wobble-racers",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["shared", "server", "client"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c magenta,cyan \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:server": "npm run dev -w server",
+    "dev:client": "npm run dev -w client",
+    "build": "npm run build -w server && npm run build -w client",
+    "start": "npm run start -w server",
+    "test": "npm test -w shared && npm test -w client && npm test -w server",
+    "loadtest": "npm run loadtest -w server",
+    "typecheck": "npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "~5.6.3"
+  }
+}
