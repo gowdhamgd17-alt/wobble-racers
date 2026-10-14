@@ -5,7 +5,9 @@ import { DEFAULT_APPEARANCE, DEFAULT_SETTINGS, MAX_HEALTH, NITRO, Phase, RacerSt
 // Schema accessors installed by defineTypes are never shadowed.
 
 export class SettingsState extends Schema {
+  declare layout: string;
   declare trackId: string;
+  declare distanceKm: number;
   declare laps: number;
   declare collisions: boolean;
   declare damage: boolean;
@@ -18,7 +20,7 @@ export class SettingsState extends Schema {
   }
 }
 defineTypes(SettingsState, {
-  trackId: 'string', laps: 'uint8', collisions: 'boolean', damage: 'boolean',
+  layout: 'string', trackId: 'string', distanceKm: 'float32', laps: 'uint8', collisions: 'boolean', damage: 'boolean',
   weapons: 'boolean', nitro: 'boolean', drift: 'boolean',
 });
 

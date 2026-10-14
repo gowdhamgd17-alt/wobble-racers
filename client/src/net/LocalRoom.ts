@@ -5,7 +5,8 @@
 
 import {
   CHARACTER_IDS, COLOR_IDS, COUNTDOWN_SECONDS, MAX_HEALTH, MSG, NEUTRAL_INPUT, NITRO, PHYS, Phase, RESPAWN, RacerStatus,
-  SIM_DT, WEAPON, autopilot, createVehicleState, decodeInput, findSafeSpot, getTrack, getVehicle, initialProgress,
+  SIM_DT, WEAPON, autopilot, constrainToTrack, createVehicleState, decodeInput, findSafeSpot, getTrack, getVehicle, initialProgress,
+  segmentHitsCar, totalLapsFor,
   placeOnTrack, progressScore, queryTrack, resolveCarCollision, stepVehicle, updateProgress,
   type Appearance, type FxMessage, type FxType, type InputState, type ProgressState, type RaceSettings, type Track, type VehicleState,
 } from '@wobble/shared';
@@ -28,7 +29,7 @@ interface Racer {
   bot: boolean; lane: number; skill: number; destroyedT: number; deathF: number; deathLat: number; deathYaw: number;
   lastRank: number; overtakeCd: number; botFireCd: number;
 }
-interface Proj { id: string; owner: string; x: number; y: number; z: number; vx: number; vz: number; life: number }
+interface Proj { id: string; owner: string; x: number; y: number; z: number; vx: number; vz: number; life: number; idx: number }
 
 export class LocalRoom {
   readonly sessionId = 'you';
@@ -51,16 +52,16 @@ export class LocalRoom {
   private projN = 0;
 
   constructor(name: string, app: Appearance, settings: RaceSettings, private bots: number) {
-    this.track = getTrack(settings.trackId);
+    this.track = getTrack(settings);
     this.state = {
       phase: Phase.LOBBY, roomName: 'Practice vs bots', code: 'SOLO', isPrivate: true, maxPlayers: bots + 1,
       hostId: this.sessionId, countdown: 0, raceId: 0, settings: { ...settings }, players: new Map(), projectiles: new Map(), finishOrder: [],
     };
     this.add(this.sessionId, name, '#YOU', app, false, 0);
-    const classes = ['speedster', 'bruiser', 'drifter'];
+    const classes = ['speedster', 'bruiser', 'drifter', 'muscle', 'buggy', 'formula', 'monster'];
     for (let i = 0; i < bots; i++) {
       this.add(`bot${i}`, BOT_NAMES[i % BOT_NAMES.length], '#BOT', {
-        carClass: classes[(i + 1) % 3], character: CHARACTER_IDS[(i + 1) % CHARACTER_IDS.length],
+        carClass: classes[(i + 1) % classes.length], character: CHARACTER_IDS[(i + 1) % CHARACTER_IDS.length],
         colorMain: COLOR_IDS[(i * 5 + 3) % COLOR_IDS.length], colorSecondary: COLOR_IDS[(i * 3 + 9) % COLOR_IDS.length],
         colorWheel: 'black', wheelStyle: ['classic', 'chunky', 'spoke'][i % 3],
       }, true, i + 1);
@@ -79,7 +80,7 @@ export class LocalRoom {
     };
     this.state.players.set(id, p);
     this.racers.set(id, {
-      p, veh: createVehicleState(0, 0, 0), prog: initialProgress(), input: { ...NEUTRAL_INPUT }, queue: [], bot,
+      p, veh: createVehicleState(0, 0, 0), prog: initialProgress(this.track), input: { ...NEUTRAL_INPUT }, queue: [], bot,
       lane: ((order % 5) - 2) * 2.6, skill: 0.82 + ((order * 37) % 17) / 100, destroyedT: 0, deathF: 0, deathLat: 0, deathYaw: 0,
       lastRank: order + 1, overtakeCd: 0, botFireCd: 1 + order * 0.3,
     });
@@ -114,7 +115,7 @@ export class LocalRoom {
 
   // ------------------------------------------------ race
   private start() {
-    this.track = getTrack(this.state.settings.trackId);
+    this.track = getTrack(this.state.settings);
     this.state.raceId++;
     this.state.finishOrder = [];
     this.projs = [];
@@ -128,7 +129,7 @@ export class LocalRoom {
       const g = this.track.grid[slots[i] % this.track.grid.length];
       r.veh = createVehicleState(g.x, g.z, g.yaw);
       r.veh.nitro = this.state.settings.nitro ? NITRO.start : 0;
-      r.prog = initialProgress();
+      r.prog = initialProgress(this.track);
       r.queue.length = 0;
       r.input = { ...NEUTRAL_INPUT };
       Object.assign(r.p, { status: RacerStatus.RACING, health: MAX_HEALTH, fireCd: 0, protectT: 0, respawnT: 0, laps: 0, nextCp: 1, finishPlace: 0, rank: slots[i] + 1 });
@@ -212,7 +213,7 @@ export class LocalRoom {
       if (r.input.fire && st.weapons && p.status === RacerStatus.RACING && p.fireCd <= 0) this.fire(r);
       if (p.status === RacerStatus.RACING) {
         const q = queryTrack(this.track, v.x, v.z, v.trackIdx);
-        const pe = updateProgress(this.track, r.prog, q.f, q.lateral, st.laps);
+        const pe = updateProgress(this.track, r.prog, q.f, q.lateral, totalLapsFor(this.track, st.laps));
         if (pe === 'lap') this.fx('lap', p.id, v.x, v.y, v.z, r.prog.laps);
         if (pe === 'finish') this.finish(r);
         p.progress = progressScore(this.track, r.prog, q.f);
@@ -220,7 +221,11 @@ export class LocalRoom {
       p.laps = r.prog.laps;
       p.nextCp = r.prog.nextCp;
     }
-    if (st.collisions) this.collide();
+    if (st.collisions) {
+      this.collide();
+      this.collide();
+      for (const r of this.racers.values()) if (r.p.status === RacerStatus.RACING) constrainToTrack(r.veh, getVehicle(r.p.carClass), this.track);
+    }
     this.stepProjectiles(dt);
     this.ranks();
     for (const r of this.racers.values()) this.sync(r);
@@ -233,7 +238,7 @@ export class LocalRoom {
   }
 
   private collide() {
-    const list = [...this.racers.values()].filter((r) => r.p.status === RacerStatus.RACING && r.p.protectT <= 0);
+    const list = [...this.racers.values()].filter((r) => r.p.status === RacerStatus.RACING);
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const a = list[i], b = list[j];
       const res = resolveCarCollision(a.veh, b.veh, getVehicle(a.p.carClass), getVehicle(b.p.carClass));
@@ -252,7 +257,8 @@ export class LocalRoom {
     r.p.fireCd = WEAPON.cooldown;
     const v = r.veh, fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
     const sp = WEAPON.projectileSpeed + Math.max(0, v.vx * fx + v.vz * fz);
-    const pr: Proj = { id: 'p' + this.projN++, owner: r.p.id, x: v.x + fx * 2.6, y: v.y + 0.8, z: v.z + fz * 2.6, vx: fx * sp, vz: fz * sp, life: WEAPON.lifetime };
+    const hl = getVehicle(r.p.carClass).halfLength + 0.6;
+    const pr: Proj = { id: 'p' + this.projN++, owner: r.p.id, x: v.x + fx * hl, y: v.y + 0.8, z: v.z + fz * hl, vx: fx * sp, vz: fz * sp, life: WEAPON.lifetime, idx: v.trackIdx };
     this.projs.push(pr);
     this.fx('shoot', r.p.id, pr.x, pr.y, pr.z, 0);
   }
@@ -262,16 +268,16 @@ export class LocalRoom {
     for (const pr of this.projs) {
       const x0 = pr.x, z0 = pr.z;
       pr.x += pr.vx * dt; pr.z += pr.vz * dt; pr.life -= dt;
-      const sx = pr.x - x0, sz = pr.z - z0, l2 = sx * sx + sz * sz || 1;
-      let hit: Racer | null = null;
+            let hit: Racer | null = null;
       for (const r of this.racers.values()) {
         if (r.p.id === pr.owner || r.p.status !== RacerStatus.RACING || r.p.protectT > 0) continue;
         const v = r.veh;
         if (Math.abs(v.y + 0.6 - pr.y) > 2.2) continue;
-        const t = Math.max(0, Math.min(1, ((v.x - x0) * sx + (v.z - z0) * sz) / l2));
-        if ((v.x - (x0 + sx * t)) ** 2 + (v.z - (z0 + sz * t)) ** 2 < PHYS.carHitRadius ** 2) { hit = r; break; }
+        const c = getVehicle(r.p.carClass);
+        if (segmentHitsCar(x0, z0, pr.x, pr.z, PHYS.projectileRadius, v.x, v.z, v.yaw, c.halfLength, c.halfWidth) >= 0) { hit = r; break; }
       }
-      const q = queryTrack(this.track, pr.x, pr.z);
+      const q = queryTrack(this.track, pr.x, pr.z, pr.idx);
+      pr.idx = q.index;
       const wall = Math.abs(q.lateral) > this.track.halfWidth + PHYS.barrierInset && pr.y < PHYS.barrierHeight + 1.2;
       if (hit) {
         const v = hit.veh, l = Math.hypot(pr.vx, pr.vz) || 1;

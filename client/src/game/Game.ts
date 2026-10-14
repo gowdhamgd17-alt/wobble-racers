@@ -5,14 +5,14 @@
 import * as THREE from 'three';
 import {
   MSG, NEUTRAL_INPUT, autopilot, Phase, RacerStatus, SIM_DT, WEAPON, cloneVehicleState, createVehicleState, damageState,
-  encodeInput, findSafeSpot, getTrack, getVehicle, placeOnTrack, queryTrack, stepVehicle, colorHex,
+  encodeInput, findSafeSpot, getTrack, getVehicle, obbOverlap, placeOnTrack, queryTrack, stepVehicle, colorHex, trackKey,
   type FxMessage, type InputState, type Track, type VehicleState,
 } from '@wobble/shared';
 import { net } from '../net/Net';
 import { input, haptic } from '../input/Input';
 import { audio } from '../audio/Audio';
 import { settingsStore, type Quality } from '../state/store';
-import { buildCar, CharacterAnimator, disposeCar, makeNameTag, type CarParts } from './models';
+import { buildCar, CharacterAnimator, disposeCar, environmentFor, makeNameTag, setModelDetail, type CarParts } from './models';
 import { buildTrackView, type TrackView } from './trackMesh';
 import { Debris, ParticleSystem, ProjectilePool, SkidMarks } from './effects';
 
@@ -25,6 +25,9 @@ export interface HudData {
   total: number;
   lap: number;
   laps: number;
+  sprint: boolean;
+  coveredKm: number;
+  raceKm: number;
   health: number;
   damage: string;
   nitro: number;
@@ -90,15 +93,21 @@ class CarEntity {
   smokeAcc = 0;
   lastPos = new THREE.Vector3();
   finishPlace = 0;
+  hl = 2.2;
+  hw = 1.1;
+  vis = new THREE.Vector3(); // visual separation offset
   constructor(public id: string, app: Record<string, string>, public name: string, isMe: boolean, scene: THREE.Scene) {
     this.key = CarEntity.keyOf(app);
+    const cfg = getVehicle(app.carClass);
+    this.hl = cfg.halfLength;
+    this.hw = cfg.halfWidth;
     this.parts = buildCar(app as never);
     this.anim = new CharacterAnimator(this.parts.rig);
     this.parts.root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
     scene.add(this.parts.root);
     if (!isMe) {
       this.tag = makeNameTag(name, colorHex(app.colorMain) === '#24252b' ? '#ffffff' : '#ffffff');
-      this.tag.position.y = 3.4;
+      this.tag.position.y = app.carClass === 'monster' ? 4.4 : app.carClass === 'bruiser' ? 3.8 : 3.2;
       this.parts.root.add(this.tag);
     }
   }
@@ -183,6 +192,8 @@ export class Game {
     this.qualityLevel = q === 'auto' ? (input.coarse ? 'medium' : 'high') : q;
     this.renderer = new THREE.WebGLRenderer({ antialias: this.qualityLevel !== 'low', powerPreference: 'high-performance' });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.className = 'game-canvas';
     container.appendChild(this.renderer.domElement);
@@ -191,8 +202,8 @@ export class Game {
 
     this.scene.background = new THREE.Color('#8fd3ff');
     this.scene.fog = new THREE.Fog('#bfe6ff', 160, 650);
-    this.scene.add(new THREE.HemisphereLight('#dff3ff', '#5a8f3a', 1.35));
-    this.sun = new THREE.DirectionalLight('#fff3d6', 1.9);
+    this.scene.add(new THREE.HemisphereLight('#dff3ff', '#5a8f3a', 1.1));
+    this.sun = new THREE.DirectionalLight('#fff3d6', 2.4);
     this.sun.position.set(60, 120, 40);
     this.sun.shadow.mapSize.set(1024, 1024);
     const sc = this.sun.shadow.camera;
@@ -201,7 +212,10 @@ export class Game {
     this.scene.add(this.sun, this.sun.target);
     this.scene.add(this.smoke.points, this.glow.points, this.skids.mesh, this.debris.mesh, this.bolts.group);
 
-    this.track = getTrack(net.room?.state?.settings?.trackId ?? 'valley');
+    this.scene.environment = environmentFor(this.renderer);
+    this.scene.environmentIntensity = 0.55;
+    setModelDetail(this.qualityLevel);
+    this.track = getTrack(net.room?.state?.settings ?? 'valley');
     this.applyQuality();
     this.buildTrack();
 
@@ -209,7 +223,7 @@ export class Game {
     this.unsub.push(net.onFx((fx) => this.onFx(fx)));
     this.unsub.push(settingsStore.subscribe(() => {
       const q2 = settingsStore.get().quality;
-      if (q2 !== 'auto' && q2 !== this.qualityLevel) { this.qualityLevel = q2; this.applyQuality(); }
+      if (q2 !== 'auto' && q2 !== this.qualityLevel) { this.qualityLevel = q2; this.applyQuality(); setModelDetail(q2); }
     }));
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
@@ -230,7 +244,7 @@ export class Game {
     if (this.trackView) { this.scene.remove(this.trackView.group); this.trackView.dispose(); }
     this.trackView = buildTrackView(this.track, this.qualityLevel);
     this.scene.add(this.trackView.group);
-    this.trackId = this.track.def.id;
+    this.trackId = this.track.key;
     this.miniPath = null;
   }
 
@@ -338,8 +352,8 @@ export class Game {
     const room = net.room;
     if (!room?.state?.players) return;
     const st = room.state;
-    if (st.settings.trackId !== this.trackId) {
-      this.track = getTrack(st.settings.trackId);
+    if (trackKey(st.settings) !== this.trackId) {
+      this.track = getTrack(st.settings);
       this.buildTrack();
     }
     const now = performance.now();
@@ -582,7 +596,8 @@ export class Game {
     this.visOffset.multiplyScalar(decay);
     this.visYawOffset *= decay;
 
-    const renderT = now - 110;
+    // Offline races patch every frame-ish; online ones every 50 ms.
+    const renderT = now - (net.offline ? 45 : 110);
     for (const c of this.cars.values()) {
       const isMe = c.id === net.myId;
       if (isMe && this.predicting) {
@@ -606,8 +621,9 @@ export class Game {
       } else {
         this.interpolate(c, renderT);
       }
-      this.updateCarVisual(c, dt, phase);
     }
+    this.separateVisuals(dt);
+    for (const c of this.cars.values()) this.updateCarVisual(c, dt, phase);
 
     // Projectiles: extrapolate from last synced state
     this.bolts.begin();
@@ -629,6 +645,35 @@ export class Game {
     if (this.miniTimer <= 0) { this.miniTimer = 1 / 15; this.drawMinimap(); }
     this.bannerT = Math.max(0, this.bannerT - dt);
     this.hitFlash = Math.max(0, this.hitFlash - dt * 2.5);
+  }
+
+  /**
+   * Remote cars are drawn slightly in the past and the local car slightly in
+   * the future, so two cars the server keeps apart can look overlapped for a
+   * frame or two. Push rendered bodies apart (visual only, eased back out).
+   */
+  private separateVisuals(dt: number) {
+    const list = [...this.cars.values()].filter((c) => c.status === RacerStatus.RACING);
+    for (const c of list) c.vis.multiplyScalar(Math.exp(-6 * dt));
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i], b = list[j];
+          const ax = a.pos.x + a.vis.x, az = a.pos.z + a.vis.z, bx = b.pos.x + b.vis.x, bz = b.pos.z + b.vis.z;
+          if (Math.abs(a.pos.y - b.pos.y) > 1.6) continue;
+          const o = obbOverlap(ax, az, a.yaw, a.hl, a.hw, bx, bz, b.yaw, b.hl, b.hw);
+          if (!o) continue;
+          // Prefer moving the remote car so the player's own car stays exactly where they steer it.
+          const meA = a.id === net.myId, meB = b.id === net.myId;
+          const wa = meA ? 0.15 : meB ? 0.85 : 0.5;
+          a.vis.x -= o.nx * o.depth * wa;
+          a.vis.z -= o.nz * o.depth * wa;
+          b.vis.x += o.nx * o.depth * (1 - wa);
+          b.vis.z += o.nz * o.depth * (1 - wa);
+        }
+      }
+    }
+    for (const c of list) { c.vis.y = 0; if (c.vis.lengthSq() > 9) c.vis.setLength(3); }
   }
 
   private interpolate(c: CarEntity, renderT: number) {
@@ -656,6 +701,7 @@ export class Game {
     const gone = c.status === RacerStatus.LEFT;
     P.root.visible = !gone;
     P.root.position.copy(c.pos);
+    if (c.status === RacerStatus.RACING) P.root.position.add(c.vis);
     P.root.rotation.set(0, c.yaw, 0);
     P.tilt.rotation.set(c.pitch, 0, c.roll, 'YXZ');
     // body + wheels hidden while destroyed; the driver gets ejected cartoon-style
@@ -675,14 +721,20 @@ export class Game {
     const ghost = c.status === RacerStatus.FINISHED || c.status === RacerStatus.DISCONNECTED;
     P.shield.visible = c.protectT > 0 && !destroyed;
     if (P.shield.visible) (P.shield.material as THREE.MeshBasicMaterial).opacity = 0.16 + Math.sin(this.time * 12) * 0.08;
-    if (c.tag) c.tag.visible = !destroyed && phase !== Phase.RESULTS;
+    if (c.tag) {
+      const d = this.camera.position.distanceTo(c.pos);
+      c.tag.visible = !destroyed && phase !== Phase.RESULTS && d < 90;
+      (c.tag.material as THREE.SpriteMaterial).opacity = Math.max(0, Math.min(1, (90 - d) / 30));
+      const sc = Math.min(1.6, Math.max(0.7, d / 25));
+      c.tag.scale.set(4 * sc * 0.6, sc * 0.6, 1);
+    }
     for (const m of [P.mats.main, P.mats.sec]) {
       m.transparent = ghost;
       m.opacity = ghost ? 0.55 : 1;
     }
 
     // Wheels
-    c.wheelSpin += (c.speed / 0.45) * dt;
+    c.wheelSpin += (c.speed / P.wheelRadius) * dt;
     for (const w of P.wheels) w.rotation.x = c.wheelSpin;
     for (const fw of P.frontWheels) fw.rotation.y = -c.steerVis * 0.45;
 
@@ -757,8 +809,9 @@ export class Game {
       this.camYaw = lerpAngle(this.camYaw, target.yaw, 1 - Math.exp(-4 * sens * dt));
     }
     const speed = target.speed;
-    const dist = 7.2 + Math.min(speed, 45) * 0.075;
-    const height = 3.1 + Math.min(speed, 45) * 0.02;
+    const big = target.hl > 2.4 || target.parts.wheelRadius > 0.8 ? 1.25 : 1;
+    const dist = (7.4 + Math.min(speed, 50) * 0.075) * big;
+    const height = (3.0 + Math.min(speed, 50) * 0.02) * big + (target.parts.wheelRadius > 0.8 ? 1 : 0);
     const fx = Math.sin(this.camYaw), fz = Math.cos(this.camYaw);
     tmpV.set(target.pos.x - fx * dist, target.pos.y + height, target.pos.z - fz * dist);
     // Collision-aware: keep the camera inside the barrier corridor and above ground
@@ -769,7 +822,7 @@ export class Game {
       tmpV.y = Math.max(tmpV.y, target.pos.y + height + 0.6);
     }
     tmpV.y = Math.max(tmpV.y, q.height + 1.2);
-    tmpV2.set(target.pos.x + fx * 5, target.pos.y + 1.1, target.pos.z + fz * 5);
+    tmpV2.set(target.pos.x + fx * 5, target.pos.y + (target.parts.wheelRadius > 0.8 ? 2.1 : 1.1), target.pos.z + fz * 5);
     if (!this.camInit) {
       this.camPos.copy(tmpV);
       this.camLook.copy(tmpV2);
@@ -847,6 +900,9 @@ export class Game {
       total: rows.filter((r) => r.status !== RacerStatus.LEFT).length,
       lap: Math.min(laps, (me?.laps ?? 0) + 1),
       laps,
+      sprint: !this.track.closed,
+      coveredKm: this.track.closed ? 0 : Math.max(0, Math.min(this.track.raceLength, (me?.progress ?? 0) * this.track.ds)) / 1000,
+      raceKm: this.track.raceLength / 1000,
       health: me?.health ?? 0,
       damage: damageState(me?.health ?? 100),
       nitro: this.predicting ? this.pred.nitro : me?.nitro ?? 0,

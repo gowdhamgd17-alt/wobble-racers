@@ -145,6 +145,14 @@ describe('starting a race', () => {
     host.room.send(MSG.SETTINGS, { laps: 42 });
     await sleep(150);
     expect(host.room.state.settings.laps).toBe(7);
+    // layout + distance
+    host.room.send(MSG.SETTINGS, { layout: 'straight', distanceKm: 5 });
+    await until(() => host.room.state.settings.layout === 'straight');
+    expect(host.room.state.settings.trackId).toBe('canyon');
+    expect(host.room.state.settings.distanceKm).toBe(5);
+    host.room.send(MSG.SETTINGS, { distanceKm: 4 }); // not an option
+    await sleep(150);
+    expect(host.room.state.settings.distanceKm).toBe(5);
     await leaveAll();
   });
 
@@ -194,7 +202,7 @@ describe('authoritative race rules', () => {
   it('destroyed cars respawn near where they died, keep lap progress, and get spawn protection', async () => {
     const { host, sr } = await racing(2);
     const r = sr._racer(host.room.sessionId)!;
-    const track = getTrack(sr.state.settings.trackId);
+    const track = getTrack(sr.state.settings);
     placeOnTrack(r.veh, track, 200, 3);
     r.prog.laps = 1;
     r.prog.nextCp = 4;
@@ -220,7 +228,7 @@ describe('authoritative race rules', () => {
     const { host, guests, sr } = await racing(2);
     const a = sr._racer(host.room.sessionId)!;
     const b = sr._racer(guests[0].room.sessionId)!;
-    const track = getTrack(sr.state.settings.trackId);
+    const track = getTrack(sr.state.settings);
     placeOnTrack(a.veh, track, 300, 0);
     sr.damage(a, 1000, 'test');
     placeOnTrack(b.veh, track, 300, 0); // park B on the death spot
@@ -233,7 +241,7 @@ describe('authoritative race rules', () => {
     const { host, guests, sr } = await racing(2);
     const a = sr._racer(host.room.sessionId)!;
     const b = sr._racer(guests[0].room.sessionId)!;
-    const track = getTrack(sr.state.settings.trackId);
+    const track = getTrack(sr.state.settings);
     placeOnTrack(a.veh, track, 300, 0);
     placeOnTrack(b.veh, track, 308, 0); // ~18m ahead
     a.state.protectT = 0; b.state.protectT = 0;
@@ -250,7 +258,7 @@ describe('authoritative race rules', () => {
     const { host, guests, sr } = await racing(2);
     sr.state.settings.laps = 1;
     const a = sr._racer(host.room.sessionId)!;
-    const track = getTrack(sr.state.settings.trackId);
+    const track = getTrack(sr.state.settings);
     // Teleporting next to the finish without checkpoints does not finish.
     placeOnTrack(a.veh, track, track.n - 3, 0);
     a.veh.vx = Math.sin(a.veh.yaw) * 20; a.veh.vz = Math.cos(a.veh.yaw) * 20;
@@ -274,6 +282,31 @@ describe('authoritative race rules', () => {
     await leaveAll();
   });
 
+  it('a straight sprint is finished by crossing every checkpoint, once', async () => {
+    const l = await lobby(2);
+    l.host.room.send(MSG.SETTINGS, { layout: 'straight', trackId: 'coast', distanceKm: 1 });
+    await until(() => l.host.room.state.settings.layout === 'straight');
+    l.guests[0].room.send(MSG.READY, { ready: true });
+    await until(() => [...l.host.room.state.players.values()].filter((p: any) => p.ready).length === 1);
+    l.host.room.send(MSG.START);
+    await until(() => l.host.room.state.phase === Phase.RACING, 6000);
+    const sr = serverRoom(l.code);
+    const track = getTrack(sr.state.settings);
+    expect(track.closed).toBe(false);
+    const a = sr._racer(l.host.room.sessionId)!;
+    // Teleporting next to the finish line does not count.
+    placeOnTrack(a.veh, track, track.finishIdx - 3, 0);
+    a.veh.vx = Math.sin(a.veh.yaw) * 20; a.veh.vz = Math.cos(a.veh.yaw) * 20;
+    await sleep(400);
+    expect(a.state.status).toBe(RacerStatus.RACING);
+    a.prog.nextCp = track.checkpoints.length - 1;
+    placeOnTrack(a.veh, track, track.finishIdx - 3, 0);
+    a.veh.vx = Math.sin(a.veh.yaw) * 20; a.veh.vz = Math.cos(a.veh.yaw) * 20;
+    await until(() => a.state.status === RacerStatus.FINISHED, 2000);
+    expect([...sr.state.finishOrder]).toEqual([l.host.room.sessionId]);
+    await leaveAll();
+  });
+
   it('a disconnecting player does not freeze the room; race completes for the rest', async () => {
     const { host, guests, sr } = await racing(3);
     sr.state.settings.laps = 1;
@@ -282,7 +315,7 @@ describe('authoritative race rules', () => {
     await until(() => sr.state.players.get(guests[1].room.sessionId)?.status === RacerStatus.LEFT);
     expect(sr.state.phase).toBe(Phase.RACING);
     // Remaining two finish.
-    const track = getTrack(sr.state.settings.trackId);
+    const track = getTrack(sr.state.settings);
     for (const id of [host.room.sessionId, guests[0].room.sessionId]) {
       const r = sr._racer(id)!;
       r.prog.nextCp = 0;

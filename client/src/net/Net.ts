@@ -1,6 +1,6 @@
 import { Client, Room } from 'colyseus.js';
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_SETTINGS, MSG, ROOM_NAME, type Appearance, type FxMessage, type RaceSettings } from '@wobble/shared';
+import { DEFAULT_SETTINGS, MSG, ROOM_NAME, sanitizeSettings, type Appearance, type FxMessage, type RaceSettings } from '@wobble/shared';
 import { LocalRoom } from './LocalRoom';
 
 export function serverUrls() {
@@ -222,10 +222,12 @@ class NetSession {
 
   /** Offline practice against in-browser bots (no server needed). */
   offline = false;
+  lastPractice: { settings: Partial<RaceSettings>; bots: number } = { settings: {}, bots: 7 };
   async practice(name: string, appearance: Appearance, settings: Partial<RaceSettings> = {}, bots = 7) {
     if (this.room) await this.leave();
     this.offline = true;
-    this.bind(new LocalRoom(name || 'You', appearance, { ...DEFAULT_SETTINGS, laps: 2, ...settings }, bots) as unknown as Room<any>);
+    this.lastPractice = { settings, bots };
+    this.bind(new LocalRoom(name || 'You', appearance, sanitizeSettings(settings, { ...DEFAULT_SETTINGS, laps: 2 }), bots) as unknown as Room<any>);
   }
 
   quickPlay(name: string, appearance: Appearance) {
@@ -281,7 +283,7 @@ function buildSnap(s: any): RoomSnap {
   return {
     phase: s.phase, roomName: s.roomName, code: s.code, isPrivate: s.isPrivate, maxPlayers: s.maxPlayers,
     hostId: s.hostId, countdown: s.countdown, raceId: s.raceId,
-    settings: { trackId: st.trackId, laps: st.laps, collisions: st.collisions, damage: st.damage, weapons: st.weapons, nitro: st.nitro, drift: st.drift },
+    settings: { layout: st.layout, trackId: st.trackId, distanceKm: st.distanceKm, laps: st.laps, collisions: st.collisions, damage: st.damage, weapons: st.weapons, nitro: st.nitro, drift: st.drift },
     players,
     finishOrder: s.finishOrder ? [...s.finishOrder] : [],
   };

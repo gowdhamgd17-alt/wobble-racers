@@ -30,7 +30,7 @@ export function Garage({ onDone, initialTab = 'car', confirmLabel = 'Confirm' }:
         </div>
         <div className="split">
           <div className="stack">
-            <PreviewBox appearance={app} label={`${VEHICLES[app.carClass as 'drifter'].label} · ${characterInfo(app.character).name}`} />
+            <PreviewBox appearance={app} focus={tab === 'driver' ? 'driver' : 'car'} label={tab === 'driver' ? characterInfo(app.character).name : `${VEHICLES[app.carClass as 'drifter'].label} · ${characterInfo(app.character).name}`} />
             <p className="small muted">Drag to spin. Colors and wheels are cosmetic only; car class changes handling.</p>
           </div>
           <div className="card stack">

@@ -1,6 +1,6 @@
 # WOBBLE RACERS
 
-Chaotic low-poly 3D multiplayer party racing in the browser. 2 to 15 players race, drift, boost, ram each other into the air, shoot blasters, explode, respawn on the spot and keep their lap progress.
+Chaotic 3D multiplayer party racing in the browser. 2 to 15 players race, drift, boost, ram each other into the air, shoot blasters, explode, respawn on the spot and keep their lap progress.
 
 - **Client:** React 18 + TypeScript + Vite + Three.js (`client/`)
 - **Server:** Node.js + TypeScript + Colyseus 0.15 over WebSockets (`server/`)
@@ -34,6 +34,18 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 ```
 
 ---
+
+## What's in the game
+
+- **7 car classes**, each with its own handling and a matching collision footprint: Speedster, Bruiser, Drifter, Muscle, Buggy (barely slows on grass), Formula (fastest, most fragile) and Monster (huge tyres, hardest hitter).
+- **8 drivers**: Professor Bonk, Moolissa, Zip-9, Pepper Pomodoro, Rexford, Luna Vega, Grandpa Gus and Pip, each with their own gag animation.
+- **Detailed procedural models**: smooth extruded bodies with real wheel arches, lathed tyres with sidewalls, tinted glass, chrome, clear-coat paint and studio reflections. Graphics quality Low/Medium lowers the polygon count for phones.
+- **Two course types, any distance**
+  - *Loop circuit*: Wobble Valley, Valley Reverse or Lagoon Ring. Pick the lap length (1, 1.5, 2, 3, 5 or 10 km) and 1 to 10 laps.
+  - *Straight sprint*: Canyon Run or Coast Road from a START gate to a FINISH gate, 1 to 10 km, with kilometre boards along the way.
+  - Ramps and boost pads are placed automatically on the straightest stretches, so every length gets jumps.
+- **Real-size collisions**: cars collide as oriented boxes that match each body, so noses and tails can no longer slide into each other. Every corner of the car stays inside the barriers, sprints have end walls, blaster hits use the real body shape, and respawns keep a full car length clear. Spawn-protected cars are still solid; they just can't be damaged.
+- **Race vs bots offline**: works with no server, with 1 to 14 bots and all the same course options.
 
 ## Controls
 
@@ -183,7 +195,7 @@ All sounds and music are synthesised at runtime with the Web Audio API, so there
 
 Automated (all passing):
 
-- **shared** (28): name validation, settings/appearance sanitising, input wire format, track geometry (15 grid slots on the road), every car class completing 2 laps on both tracks with the autopilot including ramp air time, drift grip/nitro gain, auto-righting, checkpoint skipping/finish farming prevention, finish-once, collision launch/damage scaling, safe respawn spots.
+- **shared** (94): every car class finishing every track with the autopilot, track length/grid checks for all 30 track and distance combinations, oriented-box collision and wall tests, sprint checkpoint validation, plus name validation, settings/appearance sanitising, input wire format, track geometry (15 grid slots on the road), every car class completing 2 laps on both tracks with the autopilot including ramp air time, drift grip/nitro gain, auto-righting, checkpoint skipping/finish farming prevention, finish-once, collision launch/damage scaling, safe respawn spots.
 - **client** (11, jsdom): simultaneous multi-touch, finger sliding, keyboard independence and merging, key remapping, resets on blur / orientation change / page hide / pause / pointer cancel, no driving while typing.
 - **server** (18, real Colyseus server + real colyseus.js WebSocket clients): empty name rejected, 2 players accepted, 15 accepted and the 16th rejected, solo start rejected, start with exactly 2, start with 15, non-host start rejected, unready guests block start, host lap settings, host migration, health/lap/appearance tampering ignored, input flood rate-limited, destroy → respawn keeps laps + spawn protection blocks re-destruction, respawn avoids other cars, projectile hits only by physical contact, checkpoint-validated single finish with race continuing, disconnect doesn't freeze the room and results/rematch work, unexpected disconnect + reconnect restores identity.
 

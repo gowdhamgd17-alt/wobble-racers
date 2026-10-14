@@ -177,7 +177,7 @@ export function stepVehicle(
     vF = s.vx * fx + s.vz * fz;
     let vL = s.vx * rx + s.vz * rz;
 
-    const top = cfg.maxSpeed * (s.boosting ? cfg.nitroMultiplier : 1) * (onRoad ? 1 : 0.55);
+    const top = cfg.maxSpeed * (s.boosting ? cfg.nitroMultiplier : 1) * (onRoad ? 1 : cfg.offroadSpeed);
     if (input.throttle > 0) {
       if (vF < -0.5) vF += cfg.brakeDecel * input.throttle * dt;
       else vF += cfg.acceleration * input.throttle * Math.max(0, 1 - vF / top) * dt;
@@ -188,7 +188,7 @@ export function stepVehicle(
       else vF = Math.max(-cfg.reverseSpeed, vF - cfg.acceleration * 0.6 * input.brake * dt);
     }
     // Rolling resistance / coasting
-    vF -= vF * (0.12 + (onRoad ? 0 : 1.1)) * dt;
+    vF -= vF * (0.12 + (onRoad ? 0 : 1.1 * (1 - cfg.offroadSpeed) / 0.45)) * dt;
     if (input.throttle === 0 && input.brake === 0) vF -= Math.sign(vF) * Math.min(Math.abs(vF), 3 * dt);
     if (input.handbrake) vF -= vF * (s.drifting ? 0.35 : 1.4) * dt;
     if (vF > top) vF -= (vF - top) * 1.5 * dt;
@@ -211,8 +211,10 @@ export function stepVehicle(
     if (rules.nitro && s.padCooldown <= 0) {
       for (const p of track.pads) {
         let d = q0.f - p.index;
-        if (d > track.n / 2) d -= track.n;
-        if (d < -track.n / 2) d += track.n;
+        if (track.closed) {
+          if (d > track.n / 2) d -= track.n;
+          if (d < -track.n / 2) d += track.n;
+        }
         if (Math.abs(d) < p.halfLen && Math.abs(q0.lateral - p.lateral) < p.halfWidth) {
           s.nitro = Math.min(NITRO.max, s.nitro + NITRO.padGain);
           s.vx += fx * NITRO.padImpulse;
@@ -256,33 +258,10 @@ export function stepVehicle(
   s.z += s.vz * dt;
   if (!s.grounded) s.y += s.vy * dt;
 
+  const wall = constrainToTrack(s, cfg, track);
+  if (wall > 0) ev.wallImpact = wall;
   const q = queryTrack(track, s.x, s.z, s.trackIdx);
   s.trackIdx = q.index;
-
-  // Barriers (solid unless the car is flying over them)
-  const limit = track.halfWidth + PHYS.barrierInset - PHYS.carRadius * 0.55;
-  const groundHere = q.height;
-  if (Math.abs(q.lateral) > limit && Math.abs(q.lateral) < limit + 6 && s.y < PHYS.barrierHeight + 0.4 + Math.max(0, groundHere)) {
-    const side = Math.sign(q.lateral);
-    const p = pointAt(track, q.f, 0);
-    const nx = -p.tz * side, nz = p.tx * side; // outward normal
-    const over = Math.abs(q.lateral) - limit;
-    s.x -= nx * over;
-    s.z -= nz * over;
-    const vn = s.vx * nx + s.vz * nz;
-    if (vn > 0) {
-      s.vx -= nx * vn * 1.3;
-      s.vz -= nz * vn * 1.3;
-      s.vx *= 0.93;
-      s.vz *= 0.93;
-      ev.wallImpact = vn;
-      // Nudge heading towards the wall tangent so cars scrape rather than stick
-      const tangentYaw = Math.atan2(p.tx, p.tz);
-      const fwdDot = Math.sin(s.yaw) * p.tx + Math.cos(s.yaw) * p.tz;
-      const targetYaw = fwdDot >= 0 ? tangentYaw : wrapAngle(tangentYaw + Math.PI);
-      s.yaw = wrapAngle(s.yaw + wrapAngle(targetYaw - s.yaw) * 0.15);
-    }
-  }
 
   // Ground contact
   if (s.grounded) {
@@ -374,13 +353,14 @@ export function findSafeSpot(
   const maxLat = track.halfWidth - 2.5;
   const baseLat = clamp(lateral, -maxLat, maxLat);
   const lats = [baseLat, 0, -5, 5, -maxLat, maxLat];
-  const offsets = [0, -2, 2, -4, 4, -6, 6, -9, 9, -13, 13];
-  const onRamp = (ff: number) => {
-    const i = Math.floor(((ff % track.n) + track.n) % track.n);
-    return track.heights[i] > 0.01 || track.heights[(i + 1) % track.n] > 0.01 || track.heights[(i + 2) % track.n] > 0.01;
-  };
+  const offsets = [0, -2, 2, -4, 4, -6, 6, -9, 9, -13, 13, -18, 18, -24, 24];
+  const n = track.n;
+  const idx = (ff: number) => (track.closed ? ((Math.floor(ff) % n) + n) % n : Math.max(0, Math.min(n - 1, Math.floor(ff))));
+  const onRamp = (ff: number) => track.heights[idx(ff)] > 0.01 || track.heights[idx(ff + 1)] > 0.01 || track.heights[idx(ff + 2)] > 0.01 || track.heights[idx(ff + 3)] > 0.01;
+  const margin = 8 / track.ds;
+  const clampF = (ff: number) => (track.closed ? ff : Math.max(margin, Math.min(n - 1 - margin, ff)));
   for (const o of offsets) {
-    let ff = f + o;
+    let ff = clampF(f + o * 1.5);
     // step backwards off ramps so we never respawn mid-jump
     let guard = 0;
     while (onRamp(ff) && guard++ < 20) ff -= 1;
@@ -393,7 +373,169 @@ export function findSafeSpot(
       if (free) return { f: ff, lateral: lat };
     }
   }
-  return { f, lateral: 0 };
+  return { f: clampF(f), lateral: 0 };
+}
+
+export interface CollisionResult {
+  hit: boolean;
+  closingSpeed: number;
+  damageA: number;
+  damageB: number;
+  launchedA: boolean;
+  launchedB: boolean;
+}
+
+/** Corners of a car's footprint in world space (front-left, front-right, rear-right, rear-left). */
+export function carCorners(x: number, z: number, yaw: number, hl: number, hw: number, out: number[] = []) {
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  const rx = -fz, rz = fx;
+  out.length = 0;
+  for (const [a, b] of [[hl, -hw], [hl, hw], [-hl, hw], [-hl, -hw]]) out.push(x + fx * a + rx * b, z + fz * a + rz * b);
+  return out;
+}
+
+export interface Overlap { depth: number; nx: number; nz: number; cx: number; cz: number }
+
+/**
+ * Separating-axis test between two oriented rectangles. Returns the minimum
+ * translation (normal points from A to B) and an approximate contact point, or null.
+ */
+export function obbOverlap(
+  ax: number, az: number, ayaw: number, ahl: number, ahw: number,
+  bx: number, bz: number, byaw: number, bhl: number, bhw: number,
+): Overlap | null {
+  const dx = bx - ax, dz = bz - az;
+  const reach = Math.hypot(ahl, ahw) + Math.hypot(bhl, bhw);
+  if (dx * dx + dz * dz > reach * reach) return null;
+  const afx = Math.sin(ayaw), afz = Math.cos(ayaw), bfx = Math.sin(byaw), bfz = Math.cos(byaw);
+  const axes = [[afx, afz], [-afz, afx], [bfx, bfz], [-bfz, bfx]];
+  let best = Infinity, nx = 0, nz = 0;
+  for (const [ux, uz] of axes) {
+    const ra = ahl * Math.abs(afx * ux + afz * uz) + ahw * Math.abs(-afz * ux + afx * uz);
+    const rb = bhl * Math.abs(bfx * ux + bfz * uz) + bhw * Math.abs(-bfz * ux + bfx * uz);
+    const dist = dx * ux + dz * uz;
+    const o = ra + rb - Math.abs(dist);
+    if (o <= 0) return null;
+    if (o < best) {
+      best = o;
+      const sgn = dist >= 0 ? 1 : -1;
+      nx = ux * sgn;
+      nz = uz * sgn;
+    }
+  }
+  // Contact: B's corner deepest towards A, averaged with A's corner deepest towards B.
+  const cb = carCorners(bx, bz, byaw, bhl, bhw);
+  const ca = carCorners(ax, az, ayaw, ahl, ahw);
+  let mb = Infinity, ma = -Infinity, pbx = bx, pbz = bz, pax = ax, paz = az;
+  for (let i = 0; i < 8; i += 2) {
+    const pb = cb[i] * nx + cb[i + 1] * nz;
+    if (pb < mb) { mb = pb; pbx = cb[i]; pbz = cb[i + 1]; }
+    const pa = ca[i] * nx + ca[i + 1] * nz;
+    if (pa > ma) { ma = pa; pax = ca[i]; paz = ca[i + 1]; }
+  }
+  return { depth: best, nx, nz, cx: (pax + pbx) / 2, cz: (paz + pbz) / 2 };
+}
+
+/**
+ * Swept projectile (segment p0->p1, radius r) vs a car footprint.
+ * Returns the hit fraction along the segment in [0,1], or -1.
+ */
+export function segmentHitsCar(
+  x0: number, z0: number, x1: number, z1: number, r: number,
+  cx: number, cz: number, yaw: number, hl: number, hw: number,
+): number {
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  const toLocal = (x: number, z: number) => {
+    const dx = x - cx, dz = z - cz;
+    return [dx * -fz + dz * fx, dx * fx + dz * fz]; // [right, forward]
+  };
+  const [ax, ay] = toLocal(x0, z0);
+  const [bx, by] = toLocal(x1, z1);
+  const ex = hw + r, ey = hl + r;
+  let t0 = 0, t1 = 1;
+  const dx = bx - ax, dy = by - ay;
+  for (const [p, d, e] of [[ax, dx, ex], [ay, dy, ey]] as const) {
+    if (Math.abs(d) < 1e-9) {
+      if (Math.abs(p) > e) return -1;
+    } else {
+      let ta = (-e - p) / d, tb = (e - p) / d;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) return -1;
+    }
+  }
+  return t0;
+}
+
+const CORNERS: number[] = [];
+
+/**
+ * Keep the whole car footprint inside the barriers (and inside the end walls
+ * of straight tracks). Returns the speed of the impact into a wall (0 if none).
+ * Cars flying higher than the barrier pass over it.
+ */
+export function constrainToTrack(s: VehicleState, cfg: VehicleConfig, track: Track): number {
+  const qc = queryTrack(track, s.x, s.z, s.trackIdx);
+  s.trackIdx = qc.index;
+  const ground = Math.max(0, qc.height);
+  if (s.y > PHYS.barrierHeight + 0.4 + ground) return 0;
+  const face = track.halfWidth + PHYS.barrierInset; // inner face of the barrier
+  const outerFace = face + 0.5 + 0.05;
+  const inside = Math.abs(qc.lateral) < face + 0.25;
+  let impact = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    carCorners(s.x, s.z, s.yaw, cfg.halfLength, cfg.halfWidth, CORNERS);
+    let pushX = 0, pushZ = 0, nX = 0, nZ = 0, deepest = 0, tangentX = 0, tangentZ = 0;
+    for (let i = 0; i < 8; i += 2) {
+      const q = queryTrack(track, CORNERS[i], CORNERS[i + 1], s.trackIdx);
+      const p = pointAt(track, q.f, 0);
+      const side = Math.sign(q.lateral) || 1;
+      let over = 0, ox = 0, oz = 0;
+      if (inside) {
+        over = Math.abs(q.lateral) - face;
+        ox = -p.tz * side; oz = p.tx * side; // outward normal
+      } else if (Math.abs(q.lateral) < outerFace && Math.sign(q.lateral) === Math.sign(qc.lateral)) {
+        // Car is outside the barrier: keep it outside.
+        over = outerFace - Math.abs(q.lateral);
+        ox = p.tz * side; oz = -p.tx * side;
+      }
+      // End walls on straight tracks
+      if (!track.closed) {
+        if (q.f < 0.5) {
+          const e = (0.5 - q.f) * track.ds;
+          if (e > over) { over = e; ox = -p.tx; oz = -p.tz; }
+        } else if (q.f > track.n - 1.5) {
+          const e = (q.f - (track.n - 1.5)) * track.ds;
+          if (e > over) { over = e; ox = p.tx; oz = p.tz; }
+        }
+      }
+      if (over > deepest) {
+        deepest = over;
+        nX = ox; nZ = oz;
+        pushX = -ox * over; pushZ = -oz * over;
+        tangentX = p.tx; tangentZ = p.tz;
+      }
+    }
+    if (deepest <= 0) break;
+    s.x += pushX;
+    s.z += pushZ;
+    const vn = s.vx * nX + s.vz * nZ;
+    if (vn > 0) {
+      s.vx -= nX * vn * 1.3;
+      s.vz -= nZ * vn * 1.3;
+      s.vx *= 0.94;
+      s.vz *= 0.94;
+      impact = Math.max(impact, vn);
+      // Turn towards the wall's direction so cars scrape along instead of sticking.
+      const tangentYaw = Math.atan2(tangentX, tangentZ);
+      const fwdDot = Math.sin(s.yaw) * tangentX + Math.cos(s.yaw) * tangentZ;
+      const targetYaw = fwdDot >= 0 ? tangentYaw : wrapAngle(tangentYaw + Math.PI);
+      s.yaw = wrapAngle(s.yaw + wrapAngle(targetYaw - s.yaw) * 0.12);
+      s.yawRate *= 0.6;
+    }
+  }
+  return impact;
 }
 
 export interface CollisionResult {
@@ -406,36 +548,33 @@ export interface CollisionResult {
 }
 
 /**
- * Car-vs-car response: mass-weighted impulse along the contact normal, plus
- * bounded spin and an arcade "launch" for big hits. Mutates both states.
+ * Car-vs-car response using the real oriented footprints: push apart along the
+ * minimum-overlap axis (mass weighted), then a mass-weighted impulse with
+ * spin from the contact lever arm and an arcade "launch" for big hits.
  */
 export function resolveCarCollision(
   a: VehicleState, b: VehicleState, ca: VehicleConfig, cb: VehicleConfig,
 ): CollisionResult {
   const res: CollisionResult = { hit: false, closingSpeed: 0, damageA: 0, damageB: 0, launchedA: false, launchedB: false };
-  const dx = b.x - a.x, dz = b.z - a.z;
-  const r = PHYS.carRadius * 2;
-  const d2 = dx * dx + dz * dz;
-  if (d2 >= r * r || Math.abs(a.y - b.y) > 1.6) return res;
-  const d = Math.sqrt(d2) || 0.001;
-  const nx = dx / d, nz = dz / d;
-  // Separate (mass-weighted)
-  const overlap = r - d;
+  if (Math.abs(a.y - b.y) > 1.6) return res;
+  const o = obbOverlap(a.x, a.z, a.yaw, ca.halfLength, ca.halfWidth, b.x, b.z, b.yaw, cb.halfLength, cb.halfWidth);
+  if (!o) return res;
+  const { nx, nz } = o;
   const ma = ca.mass, mb = cb.mass;
   const wa = mb / (ma + mb), wb = ma / (ma + mb);
-  a.x -= nx * overlap * wa;
-  a.z -= nz * overlap * wa;
-  b.x += nx * overlap * wb;
-  b.z += nz * overlap * wb;
+  const sep = o.depth + 0.02;
+  a.x -= nx * sep * wa;
+  a.z -= nz * sep * wa;
+  b.x += nx * sep * wb;
+  b.z += nz * sep * wb;
 
   const rvx = a.vx - b.vx, rvz = a.vz - b.vz;
   const vn = rvx * nx + rvz * nz; // >0 = approaching
   if (vn <= 0) return res;
   res.hit = true;
   res.closingSpeed = vn;
-  const e = 0.35;
+  const e = 0.3;
   const j = ((1 + e) * vn) / (1 / ma + 1 / mb);
-  // Each car hits with its own "punch": B's punch scales the impulse A receives.
   const boostA = a.boosting ? 1.35 : 1, boostB = b.boosting ? 1.35 : 1;
   const ja = (j * cb.collisionImpulse * boostB) / ma;
   const jb = (j * ca.collisionImpulse * boostA) / mb;
@@ -444,24 +583,22 @@ export function resolveCarCollision(
   b.vx += nx * jb;
   b.vz += nz * jb;
 
-  // Spin from off-centre hits: use tangential relative velocity.
-  const tvx = -nz, tvz = nx;
-  const vt = rvx * tvx + rvz * tvz;
-  a.yawRate = clamp(a.yawRate + vt * 0.08 * (mb / ma), -PHYS.maxYawRate, PHYS.maxYawRate);
-  b.yawRate = clamp(b.yawRate - vt * 0.08 * (ma / mb), -PHYS.maxYawRate, PHYS.maxYawRate);
+  // Spin from the lever arm of the contact point (yaw increases to the left).
+  const leverA = (o.cx - a.x) * nz - (o.cz - a.z) * nx;
+  const leverB = (o.cx - b.x) * nz - (o.cz - b.z) * nx;
+  const spin = (lever: number, imp: number, hl: number) => clamp((lever * imp) / (hl * 1.6), -3.5, 3.5);
+  a.yawRate = clamp(a.yawRate - spin(leverA, ja, ca.halfLength), -PHYS.maxYawRate, PHYS.maxYawRate);
+  b.yawRate = clamp(b.yawRate + spin(leverB, jb, cb.halfLength), -PHYS.maxYawRate, PHYS.maxYawRate);
 
-  // Big hits send the lighter / receiving car flying.
-  const launchFor = (s: VehicleState, recvImpulse: number, sideSign: number) => {
-    const effective = recvImpulse;
-    if (effective < PHYS.collisionLaunchSpeed * 0.6 || vn < PHYS.collisionLaunchSpeed) return false;
+  const launchFor = (s: VehicleState, recv: number, sideSign: number) => {
+    if (recv < PHYS.collisionLaunchSpeed * 0.6 || vn < PHYS.collisionLaunchSpeed) return false;
     s.grounded = false;
     s.overturnT = 0;
-    s.vy = clamp((effective - PHYS.collisionLaunchSpeed * 0.5) * 0.45, 3, PHYS.maxLaunch);
-    s.rollRate = clamp(sideSign * effective * 0.35, -PHYS.maxSpinRate, PHYS.maxSpinRate);
-    s.pitchRate = clamp(effective * 0.12, -4, 4);
+    s.vy = clamp((recv - PHYS.collisionLaunchSpeed * 0.5) * 0.45, 3, PHYS.maxLaunch);
+    s.rollRate = clamp(sideSign * recv * 0.35, -PHYS.maxSpinRate, PHYS.maxSpinRate);
+    s.pitchRate = clamp(recv * 0.12, -4, 4);
     return true;
   };
-  // Determine which side of each car the normal points to, for roll direction.
   const sideA = Math.sign(-(Math.cos(a.yaw) * nx) + Math.sin(a.yaw) * nz) || 1;
   const sideB = -Math.sign(-(Math.cos(b.yaw) * nx) + Math.sin(b.yaw) * nz) || 1;
   res.launchedA = launchFor(a, ja, sideA);

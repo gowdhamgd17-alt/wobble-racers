@@ -99,7 +99,12 @@ export function Race({ onLeave }: { onLeave: () => void }) {
         <div className="hud-tl">
           <div className="hud-panel">
             <div className="pos-big">{h?.rank || '-'}<small>/{h?.total ?? '-'}</small></div>
-            <div className="lap-text">{finished ? 'Finished!' : `Lap ${h?.lap ?? 1}/${h?.laps ?? '-'}`}</div>
+            <div className="lap-text">
+              {finished ? 'Finished!' : h?.sprint ? `${(h.coveredKm ?? 0).toFixed(1)} / ${h.raceKm.toFixed(1)} km` : `Lap ${h?.lap ?? 1}/${h?.laps ?? '-'}`}
+            </div>
+            {h?.sprint && !finished && (
+              <div className="meter" style={{ marginTop: 4 }}><span>🏁</span><div className="track"><div className="fill nitro" style={{ width: `${Math.min(100, ((h.coveredKm ?? 0) / Math.max(0.1, h.raceKm)) * 100)}%` }} /></div></div>
+            )}
           </div>
           <div className="hud-panel leader">
             {h?.leaderboard.slice(0, 6).map((r) => (

@@ -16,14 +16,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function main() {
   const t0 = Date.now();
   const rooms: Room<any>[] = [];
-  const classes = ['speedster', 'bruiser', 'drifter'];
+  const classes = ['speedster', 'bruiser', 'drifter', 'muscle', 'buggy', 'formula', 'monster'];
   const host = await new Client(url).create<any>('race', {
-    name: 'Bot 1', private: true, maxPlayers: 15, settings: { laps: LAPS },
+    name: 'Bot 1', private: true, maxPlayers: 15, settings: { laps: LAPS, layout: process.env.LAYOUT ?? 'loop', distanceKm: Number(process.env.KM ?? 1.5) },
     appearance: { carClass: classes[0] },
   });
   rooms.push(host);
   for (let i = 1; i < N; i++) {
-    rooms.push(await new Client(url).joinById<any>(host.roomId, { name: `Bot ${i + 1}`, appearance: { carClass: classes[i % 3], colorMain: ['red', 'blue', 'green', 'pink', 'cyan'][i % 5] } }));
+    rooms.push(await new Client(url).joinById<any>(host.roomId, { name: `Bot ${i + 1}`, appearance: { carClass: classes[i % classes.length], colorMain: ['red', 'blue', 'green', 'pink', 'cyan'][i % 5] } }));
   }
   console.log(`[load] ${rooms.length} clients joined room ${host.roomId} in ${Date.now() - t0}ms`);
 
@@ -47,7 +47,7 @@ async function main() {
   while (host.state.phase !== Phase.RACING) await sleep(50);
   console.log(`[load] race started with ${host.state.players.size} players`);
 
-  const track = getTrack(host.state.settings.trackId);
+  const track = getTrack(host.state.settings);
   const seq = new Map<Room<any>, number>();
   const veh: VehicleState = createVehicleState(0, 0, 0);
   const lanes = rooms.map((_, i) => ((i % 5) - 2) * 2.5);

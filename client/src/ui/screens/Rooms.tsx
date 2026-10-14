@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_SETTINGS, LAP_OPTIONS, MAX_PLAYERS, Phase, ROOM_NAME_MAX_LENGTH, TRACK_DEFS, type RaceSettings } from '@wobble/shared';
+import { DEFAULT_SETTINGS, KM_OPTIONS, LAP_OPTIONS, MAX_PLAYERS, Phase, ROOM_NAME_MAX_LENGTH, TRACK_DEFS, sanitizeSettings, tracksFor, type Layout, type RaceSettings } from '@wobble/shared';
 import { net, type RoomListing } from '../../net/Net';
 import { Btn, Segmented, Toggle } from '../components/common';
 
@@ -102,7 +102,7 @@ export function CreateRoom({ defaultName, onBack, onCreate, busy }: { defaultNam
             <label>Max players: {maxPlayers} <span className="muted small">(races can start with 2)</span></label>
             <input className="range" type="range" min={2} max={MAX_PLAYERS} value={maxPlayers} onChange={(e) => setMax(Number(e.target.value))} />
           </div>
-          <SettingsFields s={s} onChange={(p) => setS({ ...s, ...p })} />
+          <SettingsFields s={s} onChange={(p) => setS(sanitizeSettings(p, s))} />
           <Btn type="submit" variant="primary big" disabled={busy}>Create room</Btn>
         </form>
       </div>
@@ -111,22 +111,82 @@ export function CreateRoom({ defaultName, onBack, onCreate, busy }: { defaultNam
 }
 
 export function SettingsFields({ s, onChange, disabled }: { s: RaceSettings; onChange: (p: Partial<RaceSettings>) => void; disabled?: boolean }) {
+  const layout = (s.layout === 'straight' ? 'straight' : 'loop') as Layout;
+  const options = tracksFor(layout);
+  const def = TRACK_DEFS.find((t) => t.id === s.trackId);
+  const total = layout === 'loop' ? s.distanceKm * s.laps : s.distanceKm;
   return (
     <div className="stack">
       <div className="field">
-        <label>Track</label>
-        <Segmented options={TRACK_DEFS.map((t) => t.id)} value={s.trackId} disabled={disabled} onChange={(v) => onChange({ trackId: v })} render={(v) => TRACK_DEFS.find((t) => t.id === v)!.name} />
+        <label>Course type</label>
+        <Segmented<Layout>
+          options={['loop', 'straight']}
+          value={layout}
+          disabled={disabled}
+          onChange={(v) => onChange({ layout: v, trackId: tracksFor(v)[0].id })}
+          render={(v) => (v === 'loop' ? 'Loop circuit (laps)' : 'Straight sprint (A to B)')}
+        />
       </div>
       <div className="field">
-        <label>Laps</label>
-        <Segmented options={LAP_OPTIONS} value={s.laps} disabled={disabled} onChange={(v) => onChange({ laps: v })} />
+        <label>Track</label>
+        <Segmented options={options.map((t) => t.id)} value={s.trackId} disabled={disabled} onChange={(v) => onChange({ trackId: v })} render={(v) => TRACK_DEFS.find((t) => t.id === v)!.name} />
+        {def && <span className="small muted">{def.description}</span>}
       </div>
+      <div className="field">
+        <label>{layout === 'loop' ? 'Lap length' : 'Sprint distance'}</label>
+        <Segmented options={KM_OPTIONS} value={s.distanceKm as (typeof KM_OPTIONS)[number]} disabled={disabled} onChange={(v) => onChange({ distanceKm: v })} render={(v) => `${v} km`} />
+      </div>
+      {layout === 'loop' && (
+        <div className="field">
+          <label>Laps</label>
+          <Segmented options={LAP_OPTIONS} value={s.laps} disabled={disabled} onChange={(v) => onChange({ laps: v })} />
+        </div>
+      )}
+      <p className="small muted" style={{ color: 'inherit', opacity: 0.75 }}>
+        Race distance: <strong>{total % 1 ? total.toFixed(1) : total} km</strong>
+        {layout === 'loop' ? ` (${s.laps} × ${s.distanceKm} km)` : ' from start gate to finish gate'}
+      </p>
       <div>
         <Toggle label="Car collisions" checked={s.collisions} disabled={disabled} onChange={(v) => onChange({ collisions: v })} />
         <Toggle label="Car damage & destruction" checked={s.damage} disabled={disabled} onChange={(v) => onChange({ damage: v })} />
         <Toggle label="Blasters" checked={s.weapons} disabled={disabled} onChange={(v) => onChange({ weapons: v })} />
         <Toggle label="Nitro & boost pads" checked={s.nitro} disabled={disabled} onChange={(v) => onChange({ nitro: v })} />
         <Toggle label={<>Drifting <span className="small muted">(off: handbrake just brakes)</span></>} checked={s.drift} disabled={disabled} onChange={(v) => onChange({ drift: v })} />
+      </div>
+    </div>
+  );
+}
+
+const PRACTICE_KEY = 'wobble.practice';
+export interface PracticeOpts { settings: RaceSettings; bots: number }
+
+export function PracticeSetup({ onBack, onStart, busy }: { onBack: () => void; onStart: (o: PracticeOpts) => void; busy: boolean }) {
+  const [opts, setOpts] = useState<PracticeOpts>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(PRACTICE_KEY) ?? 'null');
+      if (raw) return { settings: sanitizeSettings(raw.settings, { ...DEFAULT_SETTINGS, laps: 2 }), bots: Math.max(1, Math.min(14, Number(raw.bots) || 7)) };
+    } catch { /* ignore */ }
+    return { settings: { ...DEFAULT_SETTINGS, laps: 2 }, bots: 7 };
+  });
+  const start = () => {
+    try { localStorage.setItem(PRACTICE_KEY, JSON.stringify(opts)); } catch { /* ignore */ }
+    onStart(opts);
+  };
+  return (
+    <div className="menu-bg">
+      <div className="screen" style={{ maxWidth: 720 }}>
+        <div className="topbar">
+          <Btn variant="ghost icon" aria-label="Back" onClick={onBack}>←</Btn>
+          <h2>Race vs bots</h2>
+        </div>
+        <form className="card stack" onSubmit={(e) => { e.preventDefault(); start(); }}>
+          <div className="field">
+            <label>Bots: {opts.bots}</label>
+            <input className="range" type="range" min={1} max={14} value={opts.bots} onChange={(e) => setOpts({ ...opts, bots: Number(e.target.value) })} />
+          </div>
+          <SettingsFields s={opts.settings} onChange={(p) => setOpts({ ...opts, settings: sanitizeSettings(p, opts.settings) })} />
+          <Btn type="submit" variant="primary big" disabled={busy}>Start race</Btn>
+        </form>
       </div>
     </div>
   );

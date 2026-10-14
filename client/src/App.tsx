@@ -7,13 +7,13 @@ import { Btn, ToastProvider, useToast } from './ui/components/common';
 import { Home, type HomeAction } from './ui/screens/Home';
 import { NameEntry } from './ui/screens/NameEntry';
 import { Garage } from './ui/screens/Garage';
-import { CreateRoom, RoomBrowser, type CreateOpts } from './ui/screens/Rooms';
+import { CreateRoom, PracticeSetup, RoomBrowser, type CreateOpts } from './ui/screens/Rooms';
 import { Lobby } from './ui/screens/Lobby';
 import { Race } from './ui/screens/Race';
 import { Results } from './ui/screens/Results';
 import { SettingsPanel } from './ui/screens/SettingsPanel';
 
-type MenuScreen = 'home' | 'name' | 'browse' | 'create' | 'garage';
+type MenuScreen = 'home' | 'name' | 'browse' | 'create' | 'garage' | 'practice';
 type Pending = 'quick' | 'create' | 'browse' | 'practice' | null;
 
 function AppInner() {
@@ -54,7 +54,7 @@ function AppInner() {
 
   const doPending = (p: Pending, name: string) => {
     if (p === 'quick') void run(() => net.quickPlay(name, profileStore.get().appearance));
-    else if (p === 'practice') void run(() => net.practice(name, profileStore.get().appearance));
+    else if (p === 'practice') setScreen('practice');
     else if (p === 'create') setScreen('create');
     else if (p === 'browse') setScreen('browse');
     else setScreen('home');
@@ -101,7 +101,7 @@ function AppInner() {
   } else if (screen === 'name') {
     content = (
       <NameEntry
-        continueLabel={pending === 'practice' ? 'Start racing' : pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
+        continueLabel={pending === 'practice' ? 'Set up the race' : pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
         onBack={() => setScreen('home')}
         onGarage={() => { setGarageTab('car'); setScreen('garage'); }}
         onContinue={(name) => doPending(pending, name)}
@@ -116,6 +116,14 @@ function AppInner() {
         onBack={() => setScreen('home')}
         onCreate={() => setScreen('create')}
         onJoin={(code) => void run(() => net.joinByCode(code, profile.name, profile.appearance))}
+      />
+    );
+  } else if (screen === 'practice') {
+    content = (
+      <PracticeSetup
+        busy={busy}
+        onBack={() => setScreen('home')}
+        onStart={(o) => void run(() => net.practice(profile.name, profile.appearance, o.settings, o.bots))}
       />
     );
   } else if (screen === 'create') {

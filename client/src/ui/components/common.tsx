@@ -68,7 +68,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 // ------------------------------------------------------------------ previews
-export function PreviewBox({ appearance, label }: { appearance: Appearance; label?: string }) {
+export function PreviewBox({ appearance, label, focus = 'car' }: { appearance: Appearance; label?: string; focus?: 'car' | 'driver' }) {
   const ref = useRef<HTMLDivElement>(null);
   const prev = useRef<CarPreview | null>(null);
   const [ok] = useState(() => webglAvailable());
@@ -78,6 +78,7 @@ export function PreviewBox({ appearance, label }: { appearance: Appearance; labe
     return () => { prev.current?.dispose(); prev.current = null; };
   }, [ok]);
   useEffect(() => { prev.current?.setAppearance(appearance); }, [appearance, ok]);
+  useEffect(() => { prev.current?.setFocus(focus); }, [focus, ok]);
   return (
     <div className="preview-wrap" ref={ref}>
       {!ok && <div className="center-msg" style={{ padding: 16 }}>3D preview needs WebGL, which this browser doesn't support.</div>}

@@ -3,7 +3,8 @@ import {
   validateDisplayName, sanitizeSettings, DEFAULT_SETTINGS, sanitizeAppearance, sanitizeMaxPlayers,
   getTrack, createVehicleState, stepVehicle, getVehicle, SIM_DT, autopilot, NEUTRAL_INPUT,
   initialProgress, updateProgress, queryTrack, resolveCarCollision, findSafeSpot, pointAt,
-  decodeInput, encodeInput, damageState, TRACK_IDS, NUM_SAMPLES,
+  decodeInput, encodeInput, damageState, TRACK_DEFS, KM_OPTIONS, CAR_CLASS_IDS, constrainToTrack, carCorners,
+  obbOverlap, segmentHitsCar, totalLapsFor, PHYS, sanitizeSettings as sanitize, type Track,
 } from '../src';
 
 describe('display names', () => {
@@ -71,28 +72,46 @@ describe('input wire format', () => {
   });
 });
 
-describe('track', () => {
-  for (const id of TRACK_IDS) {
-    it(`${id}: closed loop with 15 grid slots on the road and separated sections`, () => {
-      const t = getTrack(id);
-      expect(t.grid.length).toBeGreaterThanOrEqual(15);
-      for (const g of t.grid) expect(Math.abs(queryTrack(t, g.x, g.z).lateral)).toBeLessThan(t.halfWidth - 1);
-      const a = pointAt(t, 0), b = pointAt(t, NUM_SAMPLES - 1);
-      expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThan(t.ds * 1.5);
-      // grid slots don't overlap
-      for (let i = 0; i < t.grid.length; i++)
-        for (let j = i + 1; j < t.grid.length; j++)
-          expect(Math.hypot(t.grid[i].x - t.grid[j].x, t.grid[i].z - t.grid[j].z)).toBeGreaterThan(4);
-    });
-  }
+describe('tracks', () => {
+  for (const d of TRACK_DEFS)
+    for (const km of KM_OPTIONS) {
+      it(`${d.id} ${km} km: right length, 15 grid slots on the road, no overlapping slots`, () => {
+        const t = getTrack({ layout: d.layout, trackId: d.id, distanceKm: km });
+        expect(t.raceLength / 1000).toBeCloseTo(km, 1);
+        expect(t.closed).toBe(d.layout === 'loop');
+        expect(t.grid.length).toBeGreaterThanOrEqual(15);
+        for (const g of t.grid) expect(Math.abs(queryTrack(t, g.x, g.z).lateral)).toBeLessThan(t.halfWidth - 1.3);
+        for (let i = 0; i < t.grid.length; i++)
+          for (let j = i + 1; j < t.grid.length; j++)
+            expect(obbOverlap(t.grid[i].x, t.grid[i].z, t.grid[i].yaw, 2.6, 1.5, t.grid[j].x, t.grid[j].z, t.grid[j].yaw, 2.6, 1.5)).toBeNull();
+        if (t.closed) {
+          const a = pointAt(t, 0), b = pointAt(t, t.n - 1);
+          expect(Math.hypot(a.x - b.x, a.z - b.z)).toBeLessThan(t.ds * 1.5);
+        } else {
+          // Grid is behind the start line, finish line is before the end of the road.
+          for (const g of t.grid) expect(queryTrack(t, g.x, g.z).f).toBeLessThan(t.startIdx);
+          expect(t.finishIdx).toBeLessThan(t.n - 40);
+        }
+        expect(t.ramps.length).toBeGreaterThanOrEqual(1);
+        expect(t.pads.length).toBeGreaterThanOrEqual(2);
+      });
+    }
+  it('sanitises layout, track and distance together', () => {
+    expect(sanitize({ layout: 'straight' })).toMatchObject({ layout: 'straight', trackId: 'canyon' });
+    expect(sanitize({ layout: 'loop', trackId: 'canyon' }).trackId).toBe('valley');
+    expect(sanitize({ distanceKm: 7 }).distanceKm).toBe(1.5);
+    expect(sanitize({ distanceKm: 7 }, { ...sanitize({}), distanceKm: 5 }).distanceKm).toBe(5);
+    expect(sanitize({ distanceKm: 10 }).distanceKm).toBe(10);
+    expect(totalLapsFor(getTrack({ layout: 'straight', trackId: 'coast', distanceKm: 2 }), 5)).toBe(1);
+  });
 });
 
-function driveLaps(classId: string, trackId: string, laps: number, maxSeconds: number) {
-  const t = getTrack(trackId);
+function driveLaps(classId: string, track: Track, laps: number, maxSeconds: number) {
+  const t = track;
   const cfg = getVehicle(classId);
   const g = t.grid[0];
   const s = createVehicleState(g.x, g.z, g.yaw);
-  const p = initialProgress();
+  const p = initialProgress(t);
   let airborne = 0;
   let steps = 0;
   const rules = { nitro: true, drift: true };
@@ -101,7 +120,7 @@ function driveLaps(classId: string, trackId: string, laps: number, maxSeconds: n
     if (!s.grounded) airborne++;
     expect(ev.recover).toBe('');
     const q = queryTrack(t, s.x, s.z);
-    updateProgress(t, p, q.f, q.lateral, laps);
+    updateProgress(t, p, q.f, q.lateral, totalLapsFor(t, laps));
     steps++;
   }
   return { p, seconds: steps * SIM_DT, airborne };
@@ -109,7 +128,7 @@ function driveLaps(classId: string, trackId: string, laps: number, maxSeconds: n
 
 describe('vehicle controller', () => {
   it('accelerates forward and respects top speed', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const cfg = getVehicle('speedster');
     const g = t.grid[1];
     const s = createVehicleState(g.x, g.z, g.yaw);
@@ -118,22 +137,28 @@ describe('vehicle controller', () => {
     expect(v).toBeGreaterThan(15);
     expect(v).toBeLessThan(cfg.maxSpeed + 1);
   });
-  for (const cls of ['speedster', 'bruiser', 'drifter'])
-    for (const tr of TRACK_IDS)
-      it(`${cls} completes 2 laps of ${tr} with the autopilot and catches air on ramps`, () => {
-        const r = driveLaps(cls, tr, 2, 240);
+  for (const cls of CAR_CLASS_IDS)
+    for (const d of TRACK_DEFS)
+      it(`${cls} finishes a 1 km ${d.layout} on ${d.id} with the autopilot and catches air`, () => {
+        const r = driveLaps(cls, getTrack({ layout: d.layout, trackId: d.id, distanceKm: 1 }), 1, 150);
         expect(r.p.finished).toBe(true);
         expect(r.airborne).toBeGreaterThan(5);
       });
+  it('formula finishes a 3 km sprint and a 2-lap 2 km loop', () => {
+    expect(driveLaps('formula', getTrack({ layout: 'straight', trackId: 'canyon', distanceKm: 3 }), 1, 300).p.finished).toBe(true);
+    expect(driveLaps('formula', getTrack({ layout: 'loop', trackId: 'lagoon', distanceKm: 2 }), 2, 400).p.finished).toBe(true);
+  });
 
   it('classes genuinely differ', () => {
     expect(getVehicle('bruiser').mass).toBeGreaterThan(getVehicle('speedster').mass);
     expect(getVehicle('speedster').maxSpeed).toBeGreaterThan(getVehicle('bruiser').maxSpeed);
     expect(getVehicle('drifter').driftGrip).toBeLessThan(getVehicle('bruiser').driftGrip);
+    expect(getVehicle('buggy').offroadSpeed).toBeGreaterThan(getVehicle('formula').offroadSpeed);
+    expect(CAR_CLASS_IDS.length).toBe(7);
   });
 
   it('drifting reduces grip and builds nitro', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const cfg = getVehicle('drifter');
     const g = t.grid[1];
     const s = createVehicleState(g.x, g.z, g.yaw);
@@ -151,7 +176,7 @@ describe('vehicle controller', () => {
   });
 
   it('overturned cars right themselves automatically', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const cfg = getVehicle('drifter');
     const g = t.grid[1];
     const s = createVehicleState(g.x, g.z, g.yaw);
@@ -163,9 +188,26 @@ describe('vehicle controller', () => {
   });
 });
 
+describe('sprint validation', () => {
+  const t = getTrack({ layout: 'straight', trackId: 'canyon', distanceKm: 2 });
+  it('cannot skip to the finish', () => {
+    const p = initialProgress(t);
+    expect(updateProgress(t, p, t.finishIdx + 1, 0, 1)).toBeNull();
+    expect(p.finished).toBe(false);
+  });
+  it('finishes once after every checkpoint in order', () => {
+    const p = initialProgress(t);
+    let last = null;
+    for (const c of t.checkpoints) last = updateProgress(t, p, c + 1, 0, 1);
+    expect(last).toBe('finish');
+    expect(p.finished).toBe(true);
+    expect(updateProgress(t, p, t.finishIdx + 1, 0, 1)).toBeNull();
+  });
+});
+
 describe('lap validation', () => {
   it('cannot skip checkpoints or farm the finish line', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const p = initialProgress();
     // Jump straight to the finish line region repeatedly: no laps credited.
     for (let k = 0; k < 10; k++) updateProgress(t, p, 1, 0, 3);
@@ -179,7 +221,7 @@ describe('lap validation', () => {
     expect(p.laps).toBe(1);
   });
   it('finishes exactly once', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const p = initialProgress();
     for (let c = 1; c < t.checkpoints.length; c++) updateProgress(t, p, t.checkpoints[c] + 1, 0, 1);
     expect(updateProgress(t, p, 1, 0, 1)).toBe('finish');
@@ -189,40 +231,82 @@ describe('lap validation', () => {
   });
 });
 
-describe('collisions', () => {
-  it('head-on high speed hit launches cars and damages them, heavier car takes less', () => {
-    const t = getTrack('valley');
+describe('collisions use the real car size', () => {
+  const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
+  it('nose-to-tail: cars 4 m apart (centre) overlap and get pushed apart fully', () => {
+    const cfg = getVehicle('muscle');
     const a = createVehicleState(0, 0, 0);
-    const b = createVehicleState(0, 3, Math.PI);
+    const b = createVehicleState(0, 4, 0);
+    a.vz = 20; b.vz = 10;
+    const r = resolveCarCollision(a, b, cfg, cfg);
+    expect(r.hit).toBe(true);
+    expect(obbOverlap(a.x, a.z, a.yaw, cfg.halfLength, cfg.halfWidth, b.x, b.z, b.yaw, cfg.halfLength, cfg.halfWidth)).toBeNull();
+    expect(b.vz).toBeGreaterThan(10);
+  });
+  it('side by side but not touching: no collision', () => {
+    const cfg = getVehicle('drifter');
+    const a = createVehicleState(0, 0, 0);
+    const b = createVehicleState(cfg.halfWidth * 2 + 0.1, 0, 0);
+    expect(resolveCarCollision(a, b, cfg, cfg).hit).toBe(false);
+  });
+  it('head-on high speed hit launches the light car and hurts it more', () => {
+    const a = createVehicleState(0, 0, 0);
+    const b = createVehicleState(0, 4.5, Math.PI);
     a.vz = 35; b.vz = -35;
-    const r = resolveCarCollision(a, b, getVehicle('bruiser'), getVehicle('speedster'));
+    const r = resolveCarCollision(a, b, getVehicle('monster'), getVehicle('speedster'));
     expect(r.hit).toBe(true);
     expect(r.launchedB).toBe(true);
-    expect(b.grounded).toBe(false);
     expect(r.damageB).toBeGreaterThan(r.damageA);
-    expect(Math.abs(b.rollRate)).toBeLessThanOrEqual(9);
-    void t;
+    expect(Math.abs(b.rollRate)).toBeLessThanOrEqual(PHYS.maxSpinRate);
   });
   it('small bump is just a shove', () => {
     const a = createVehicleState(0, 0, 0);
-    const b = createVehicleState(0, 3, 0);
+    const b = createVehicleState(0, 4.3, 0);
     a.vz = 6; b.vz = 3;
     const r = resolveCarCollision(a, b, getVehicle('drifter'), getVehicle('drifter'));
     expect(r.hit).toBe(true);
     expect(r.launchedA || r.launchedB).toBe(false);
     expect(r.damageA + r.damageB).toBe(0);
-    expect(b.vz).toBeGreaterThan(3);
+  });
+  it('a car turned sideways against the barrier keeps every corner inside it', () => {
+    for (const cls of CAR_CLASS_IDS) {
+      const cfg = getVehicle(cls);
+      const p = pointAt(t, 40, t.halfWidth + 0.5); // centre right next to the barrier
+      const s = createVehicleState(p.x, p.z, p.yaw + Math.PI / 2); // perpendicular to the wall
+      s.trackIdx = 40;
+      s.vx = -p.tz * 15; s.vz = p.tx * 15; // driving into the wall
+      constrainToTrack(s, cfg, t);
+      const c = carCorners(s.x, s.z, s.yaw, cfg.halfLength, cfg.halfWidth);
+      for (let i = 0; i < 8; i += 2) expect(Math.abs(queryTrack(t, c[i], c[i + 1], 40).lateral)).toBeLessThanOrEqual(t.halfWidth + PHYS.barrierInset + 0.01);
+    }
+  });
+  it('end walls stop cars leaving a sprint track', () => {
+    const st = getTrack({ layout: 'straight', trackId: 'canyon', distanceKm: 1 });
+    const cfg = getVehicle('formula');
+    const p = pointAt(st, st.n - 1, 0);
+    const s = createVehicleState(p.x, p.z, p.yaw);
+    s.trackIdx = st.n - 1;
+    s.vx = p.tx * 30; s.vz = p.tz * 30;
+    for (let i = 0; i < 60; i++) stepVehicle(s, { ...NEUTRAL_INPUT, throttle: 1 }, cfg, st, { nitro: true, drift: true }, SIM_DT);
+    expect(queryTrack(st, s.x, s.z).f).toBeLessThan(st.n - 1);
+  });
+  it('blaster shots hit the long body, not just the centre', () => {
+    const cfg = getVehicle('formula');
+    // Shot crossing the car 2.2 m in front of its centre (still on the nose)
+    expect(segmentHitsCar(-10, 2.2, 10, 2.2, 0.4, 0, 0, 0, cfg.halfLength, cfg.halfWidth)).toBeGreaterThanOrEqual(0);
+    // Shot passing 0.6 m beside the car misses
+    expect(segmentHitsCar(cfg.halfWidth + 1, -10, cfg.halfWidth + 1, 10, 0.4, 0, 0, 0, cfg.halfLength, cfg.halfWidth)).toBe(-1);
   });
 });
 
 describe('safe respawn spot', () => {
   it('avoids occupied positions and ramps', () => {
-    const t = getTrack('valley');
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
     const f = t.ramps[0].start + 2;
     const blocked = pointAt(t, f, 0);
-    const spot = findSafeSpot(t, f, 0, [{ x: blocked.x, z: blocked.z }], 4.5);
+    const spot = findSafeSpot(t, f, 0, [{ x: blocked.x, z: blocked.z }], 6.5);
     const p = pointAt(t, spot.f, spot.lateral);
-    expect(Math.hypot(p.x - blocked.x, p.z - blocked.z)).toBeGreaterThan(4.5);
+    expect(Math.hypot(p.x - blocked.x, p.z - blocked.z)).toBeGreaterThan(6.5);
     const i = Math.floor(spot.f);
     expect(t.heights[((i % t.n) + t.n) % t.n]).toBe(0);
   });

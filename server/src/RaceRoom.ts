@@ -2,7 +2,8 @@ import { Client, Room, ServerError } from '@colyseus/core';
 import {
   COUNTDOWN_SECONDS, INPUT_LIMITS, MAX_HEALTH, MIN_PLAYERS_TO_START, MSG, NEUTRAL_INPUT, NITRO, PHYS, Phase,
   RECONNECT_GRACE_SECONDS, RESPAWN, RacerStatus, SIM_DT, SIM_HZ, PATCH_RATE_MS, WEAPON,
-  createVehicleState, decodeInput, findSafeSpot, getTrack, getVehicle, initialProgress, placeOnTrack,
+  constrainToTrack, createVehicleState, decodeInput, findSafeSpot, getTrack, getVehicle, initialProgress, placeOnTrack,
+  segmentHitsCar, totalLapsFor, trackName,
   progressScore, queryTrack, resolveCarCollision, sanitizeAppearance, sanitizeMaxPlayers, sanitizeSettings,
   stepVehicle, updateProgress, validateDisplayName, validateRoomName,
   type FxMessage, type FxType, type InputState, type ProgressState, type Track, type VehicleState,
@@ -35,6 +36,7 @@ interface Projectile {
   x: number; y: number; z: number;
   vx: number; vz: number;
   life: number;
+  idx: number; // track sample hint
   state: ProjectileState;
 }
 
@@ -68,7 +70,7 @@ export class RaceRoom extends Room<RaceState> {
     Object.assign(state.settings, sanitizeSettings(options.settings));
     this.setState(state);
     this.maxClients = state.maxPlayers;
-    this.track = getTrack(state.settings.trackId);
+    this.track = getTrack(state.settings);
     if (state.isPrivate) await this.setPrivate(true);
     this.setPatchRate(PATCH_RATE_MS);
     this.updateMetadata();
@@ -182,7 +184,7 @@ export class RaceRoom extends Room<RaceState> {
 
   private makeRacer(id: string, state: PlayerState): Racer {
     return {
-      sessionId: id, state, veh: createVehicleState(0, 0, 0), prog: initialProgress(),
+      sessionId: id, state, veh: createVehicleState(0, 0, 0), prog: initialProgress(this.track),
       input: { ...NEUTRAL_INPUT }, queue: [], inputTokens: INPUT_LIMITS.maxPerSecond, actionTokens: 10,
       rejectedInputs: 0, destroyedT: 0, deathF: 0, deathLat: 0, deathYaw: 0, lastRank: 0, overtakeCd: 0,
       prevFire: false,
@@ -225,12 +227,11 @@ export class RaceRoom extends Room<RaceState> {
   }
 
   private updateMetadata() {
-    const t = getTrack(this.state.settings.trackId);
     void this.setMetadata({
       name: this.state.roomName,
       code: this.state.code,
       phase: this.state.phase,
-      track: t.def.name,
+      track: trackName(this.state.settings),
       laps: this.state.settings.laps,
       isPrivate: this.state.isPrivate,
       players: this.connectedCount(),
@@ -278,13 +279,13 @@ export class RaceRoom extends Room<RaceState> {
     if (!LOBBY_PHASES.includes(this.state.phase)) return this.sendError(client, 'locked', 'Settings are locked during a race.');
     const s = this.state.settings;
     Object.assign(s, sanitizeSettings(raw, {
-      trackId: s.trackId, laps: s.laps, collisions: s.collisions, damage: s.damage,
+      layout: s.layout, trackId: s.trackId, distanceKm: s.distanceKm, laps: s.laps, collisions: s.collisions, damage: s.damage,
       weapons: s.weapons, nitro: s.nitro, drift: s.drift,
     }));
     if (raw && typeof raw === 'object' && 'roomName' in raw) {
       this.state.roomName = validateRoomName((raw as { roomName: unknown }).roomName, this.state.roomName);
     }
-    this.track = getTrack(s.trackId);
+    this.track = getTrack(s);
     // Changing the rules un-readies everyone so nobody is surprised.
     this.state.players.forEach((p) => { if (p.id !== this.state.hostId) p.ready = false; });
     this.updateMetadata();
@@ -313,7 +314,7 @@ export class RaceRoom extends Room<RaceState> {
     for (const [id, r] of [...this.racers]) {
       if (!r.state.connected) { this.racers.delete(id); this.state.players.delete(id); }
     }
-    this.track = getTrack(this.state.settings.trackId);
+    this.track = getTrack(this.state.settings);
     this.state.raceId += 1;
     this.state.finishOrder.clear();
     this.projectiles.forEach((p) => this.state.projectiles.delete(p.id));
@@ -324,7 +325,7 @@ export class RaceRoom extends Room<RaceState> {
       const g = this.track.grid[i % this.track.grid.length];
       r.veh = createVehicleState(g.x, g.z, g.yaw);
       r.veh.nitro = this.state.settings.nitro ? NITRO.start : 0;
-      r.prog = initialProgress();
+      r.prog = initialProgress(this.track);
       r.queue.length = 0;
       r.input = { ...NEUTRAL_INPUT };
       r.destroyedT = 0;
@@ -468,7 +469,7 @@ export class RaceRoom extends Room<RaceState> {
       // Lap progress (authoritative)
       if (s.status === RacerStatus.RACING) {
         const q = queryTrack(this.track, v.x, v.z, v.trackIdx);
-        const pe = updateProgress(this.track, r.prog, q.f, q.lateral, settings.laps);
+        const pe = updateProgress(this.track, r.prog, q.f, q.lateral, totalLapsFor(this.track, settings.laps));
         if (pe === 'lap') this.fx('lap', r.sessionId, v.x, v.y, v.z, r.prog.laps);
         if (pe === 'finish') this.finish(r);
         s.progress = progressScore(this.track, r.prog, q.f);
@@ -477,15 +478,23 @@ export class RaceRoom extends Room<RaceState> {
       s.nextCp = r.prog.nextCp;
     }
 
-    if (settings.collisions) this.collideCars();
+    if (settings.collisions) {
+      // Two passes so piles of cars fully separate; then walls win over car pushes.
+      this.collideCars();
+      this.collideCars();
+      for (const r of this.racers.values()) {
+        if (this.canCollide(r)) constrainToTrack(r.veh, getVehicle(r.state.carClass), this.track);
+      }
+    }
     this.stepProjectiles(dt);
     this.updateRanks();
     for (const r of this.racers.values()) this.syncVehicle(r);
     this.checkRaceComplete();
   }
 
+  /** Racing cars are solid, including spawn-protected ones (they just take no damage). */
   private canCollide(r: Racer) {
-    return r.state.status === RacerStatus.RACING && r.state.protectT <= 0;
+    return r.state.status === RacerStatus.RACING;
   }
 
   private collideCars() {
@@ -517,9 +526,9 @@ export class RaceRoom extends Room<RaceState> {
     const id = 'p' + this.projCounter++;
     const proj: Projectile = {
       id, owner: r.sessionId,
-      x: v.x + fx * 2.6, y: v.y + 0.8, z: v.z + fz * 2.6,
+      x: v.x + fx * (getVehicle(r.state.carClass).halfLength + 0.6), y: v.y + 0.8, z: v.z + fz * (getVehicle(r.state.carClass).halfLength + 0.6),
       vx: fx * (WEAPON.projectileSpeed + fwdSpeed), vz: fz * (WEAPON.projectileSpeed + fwdSpeed),
-      life: WEAPON.lifetime, state: new ProjectileState(),
+      life: WEAPON.lifetime, idx: v.trackIdx, state: new ProjectileState(),
     };
     proj.state.owner = r.sessionId;
     this.projectiles.push(proj);
@@ -541,19 +550,18 @@ export class RaceRoom extends Room<RaceState> {
       p.life -= dt;
       let hit: Racer | null = null;
       let bestT = 2;
-      // Swept segment vs sphere around each eligible car
-      const sx = p.x - x0, sz = p.z - z0;
-      const len2 = sx * sx + sz * sz || 1;
+      // Swept segment vs each eligible car's real footprint
       for (const r of this.racers.values()) {
         if (r.sessionId === p.owner || r.state.status !== RacerStatus.RACING || r.state.protectT > 0) continue;
         const v = r.veh;
         if (Math.abs(v.y + 0.6 - p.y) > 2.2) continue;
-        const t = Math.max(0, Math.min(1, ((v.x - x0) * sx + (v.z - z0) * sz) / len2));
-        const cx = x0 + sx * t, cz = z0 + sz * t;
-        if ((v.x - cx) ** 2 + (v.z - cz) ** 2 < PHYS.carHitRadius ** 2 && t < bestT) { bestT = t; hit = r; }
+        const cfg = getVehicle(r.state.carClass);
+        const t = segmentHitsCar(x0, z0, p.x, p.z, PHYS.projectileRadius, v.x, v.z, v.yaw, cfg.halfLength, cfg.halfWidth);
+        if (t >= 0 && t < bestT) { bestT = t; hit = r; }
       }
       // Projectiles stop at barriers
-      const q = queryTrack(this.track, p.x, p.z);
+      const q = queryTrack(this.track, p.x, p.z, p.idx);
+      p.idx = q.index;
       const hitWall = Math.abs(q.lateral) > this.track.halfWidth + PHYS.barrierInset && p.y < PHYS.barrierHeight + 1.2;
       if (hit) {
         const v = hit.veh;

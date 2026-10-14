@@ -36,7 +36,9 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div className="small">{status}</div>
-                  <div className="small muted">{p.laps}/{snap.settings.laps} laps</div>
+                  <div className="small muted">
+                    {snap.settings.layout === 'straight' ? `${snap.settings.distanceKm} km sprint` : `${p.laps}/${snap.settings.laps} laps`}
+                  </div>
                 </div>
               </div>
             );

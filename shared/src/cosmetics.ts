@@ -21,7 +21,7 @@ export const WHEEL_STYLES: { id: string; label: string }[] = [
   { id: 'spoke', label: 'Star Spoke' },
 ];
 
-export type CharacterId = 'bonk' | 'moo' | 'zip' | 'pepper';
+export type CharacterId = 'bonk' | 'moo' | 'zip' | 'pepper' | 'rex' | 'luna' | 'gramps' | 'pip';
 
 export const CHARACTERS: {
   id: CharacterId;
@@ -52,6 +52,30 @@ export const CHARACTERS: {
     name: 'Pepper Pomodoro',
     personality: 'Dramatic chef. Waves a ladle at everyone she passes.',
     palette: ['#c9784f', '#ffffff', '#e63946'],
+  },
+  {
+    id: 'rex',
+    name: 'Rexford',
+    personality: 'Tiny-armed dinosaur. Cannot reach the steering wheel, races anyway.',
+    palette: ['#5cbf5a', '#f5d76e', '#2e7d32'],
+  },
+  {
+    id: 'luna',
+    name: 'Luna Vega',
+    personality: 'Astronaut on shore leave. Treats every jump like a moon landing.',
+    palette: ['#f0f0f5', '#ff7a45', '#7fd6ff'],
+  },
+  {
+    id: 'gramps',
+    name: 'Grandpa Gus',
+    personality: 'Has driven since cars had cranks. Shakes his fist at anyone who passes.',
+    palette: ['#f1c9a5', '#8d6e63', '#e0e0e0'],
+  },
+  {
+    id: 'pip',
+    name: 'Pip',
+    personality: 'Small penguin, enormous ego. Flaps with joy at every overtake.',
+    palette: ['#23263a', '#ffffff', '#ffa726'],
   },
 ];
 

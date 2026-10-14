@@ -1,6 +1,6 @@
 import { DEFAULT_LAPS, LAP_OPTIONS, MAX_PLAYERS, MIN_PLAYERS_TO_START, NAME_MAX_LENGTH, ROOM_NAME_MAX_LENGTH } from './constants';
 import { CHARACTER_IDS, COLOR_IDS, WHEEL_STYLE_IDS } from './cosmetics';
-import { TRACK_IDS } from './track';
+import { DEFAULT_KM, KM_OPTIONS, normalizeSpec } from './track';
 import { CAR_CLASS_IDS } from './vehicles';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -32,7 +32,9 @@ export function validateRoomName(raw: unknown, fallback: string): string {
 }
 
 export interface RaceSettings {
+  layout: string; // 'loop' | 'straight'
   trackId: string;
+  distanceKm: number; // lap length (loop) or sprint length (straight)
   laps: number;
   collisions: boolean;
   damage: boolean;
@@ -42,7 +44,9 @@ export interface RaceSettings {
 }
 
 export const DEFAULT_SETTINGS: RaceSettings = {
-  trackId: TRACK_IDS[0],
+  layout: 'loop',
+  trackId: 'valley',
+  distanceKm: DEFAULT_KM,
   laps: DEFAULT_LAPS,
   collisions: true,
   damage: true,
@@ -56,7 +60,16 @@ export function sanitizeSettings(raw: unknown, base: RaceSettings = DEFAULT_SETT
   const out = { ...base };
   if (!raw || typeof raw !== 'object') return out;
   const r = raw as Record<string, unknown>;
-  if (typeof r.trackId === 'string' && TRACK_IDS.includes(r.trackId)) out.trackId = r.trackId;
+  // Layout, track and distance are validated together (a track belongs to one layout).
+  const spec = normalizeSpec({
+    layout: typeof r.layout === 'string' ? r.layout : out.layout,
+    trackId: typeof r.trackId === 'string' ? r.trackId : out.trackId,
+    // An invalid distance keeps the current one rather than resetting it.
+    distanceKm: (KM_OPTIONS as readonly number[]).includes(r.distanceKm as number) ? (r.distanceKm as number) : out.distanceKm,
+  });
+  out.layout = spec.layout;
+  out.trackId = spec.trackId;
+  out.distanceKm = spec.distanceKm;
   if (typeof r.laps === 'number' && (LAP_OPTIONS as readonly number[]).includes(r.laps)) out.laps = r.laps;
   for (const k of ['collisions', 'damage', 'weapons', 'nitro', 'drift'] as const) {
     if (typeof r[k] === 'boolean') out[k] = r[k] as boolean;

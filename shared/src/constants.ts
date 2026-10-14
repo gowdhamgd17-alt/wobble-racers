@@ -20,8 +20,7 @@ export const MAX_HEALTH = 100;
 
 export const PHYS = {
   gravity: 20,
-  carRadius: 1.55, // car-vs-car circle radius
-  carHitRadius: 1.9, // projectile hit radius
+  projectileRadius: 0.4,
   barrierInset: 1.2, // barrier sits this far beyond road half-width
   barrierHeight: 1.2,
   maxYawRate: 7,
@@ -62,7 +61,7 @@ export const WEAPON = {
 export const RESPAWN = {
   destroyedSeconds: 1.6,
   protectionSeconds: 2,
-  safeClearance: 4.5,
+  safeClearance: 6.5, // centre-to-centre, longer than the longest car
 } as const;
 
 export const INPUT_LIMITS = {

@@ -28,7 +28,7 @@ setInterval(() => {
     const p = st.players.get(r.sessionId);
     if (!p) continue;
     Object.assign(veh, { x: p.x, z: p.z, yaw: p.yaw, vx: p.vx, vz: p.vz, trackIdx: -1 });
-    const inp = autopilot(veh, getTrack(st.settings.trackId), 9, (i - 1) * 3);
+    const inp = autopilot(veh, getTrack(st.settings), 9, (i - 1) * 3);
     inp.recover = Math.hypot(p.vx, p.vz) < 1;
     r.send(MSG.INPUT, encodeInput(++seq, inp));
   }
