@@ -60,18 +60,11 @@ export type ConnStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 
 const RECONNECT_KEY = 'wobble.reconnect';
 
-/** Built for a page with no game server at all (e.g. the shareable bots-only link). */
-export const OFFLINE_ONLY = import.meta.env.VITE_OFFLINE_ONLY === '1';
-
 export const SERVER_MISSING_MSG = () =>
-  "Online races with friends aren't available right now because the game server can't be reached. You can still race against bots.";
-/** Technical detail for whoever hosts the game. */
-export const SERVER_MISSING_DETAIL = () =>
-  `Looked for the game server at ${serverUrls().http}. Run the server/ app there, or build the site with VITE_SERVER_URL pointing to it.`;
+  `The WOBBLE RACERS game server isn't reachable at ${serverUrls().http}. The website is up, but the multiplayer server (the server/ folder) must also be running there, or the site must be built with VITE_SERVER_URL pointing to it.`;
 
 /** True when the game server answers its health check (not just any web host). */
 export async function checkServer(): Promise<boolean> {
-  if (OFFLINE_ONLY) return false;
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
