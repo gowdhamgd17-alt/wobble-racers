@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Btn } from '../components/common';
-import { SERVER_MISSING_MSG, checkServer } from '../../net/Net';
+import { OFFLINE_ONLY, SERVER_MISSING_DETAIL, SERVER_MISSING_MSG, checkServer } from '../../net/Net';
 
 export type HomeAction = 'practice' | 'play' | 'quick' | 'create' | 'browse' | 'garage' | 'character' | 'settings';
 
 export function Home({ name, onAction, busy }: { name: string; onAction: (a: HomeAction) => void; busy: boolean }) {
   const title = 'WOBBLE RACERS';
-  const [serverOk, setServerOk] = useState<boolean | null>(null);
+  const [serverOk, setServerOk] = useState<boolean | null>(OFFLINE_ONLY ? false : null);
   useEffect(() => {
+    if (OFFLINE_ONLY) return;
     let alive = true;
     const run = () => checkServer().then((ok) => { if (alive) setServerOk(ok); });
     void run();
@@ -23,28 +24,36 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
               <div key={wi}>{[...w].map((ch, i) => <span key={i}>{ch}</span>)}</div>
             ))}
           </h1>
-          <p className="tagline">Race, drift, boost and bonk your friends off the road. 2 to 15 players.</p>
+          <p className="tagline">{OFFLINE_ONLY ? 'Race, drift, boost and bonk up to 14 bots off the road.' : 'Race, drift, boost and bonk your friends off the road. 2 to 15 players.'}</p>
         </div>
-        {serverOk === false && (
-          <div className="card server-banner" role="alert">
-            <h3>Online multiplayer is offline</h3>
-            <p className="small">You can still race right now against 7 bots. {SERVER_MISSING_MSG()}</p>
+        {serverOk === false && !OFFLINE_ONLY && (
+          <div className="card server-banner" role="status">
+            <h3>Online races are unavailable</h3>
+            <p className="small">{SERVER_MISSING_MSG()}</p>
+            <details className="small" style={{ marginTop: 6, color: '#555b8a' }}>
+              <summary style={{ cursor: 'pointer' }}>Details for the host</summary>
+              {SERVER_MISSING_DETAIL()}
+            </details>
           </div>
         )}
         <div className="home-grid">
           {serverOk === false ? (
             <Btn variant="primary big wide" disabled={busy} onClick={() => onAction('practice')}>
-              Play now vs bots
+              Race vs bots
             </Btn>
           ) : (
             <Btn variant="primary big wide" disabled={busy} onClick={() => onAction('play')}>
               {name ? `Play now as ${name}` : 'Play now'}
             </Btn>
           )}
-          {serverOk !== false && <Btn variant="ghost wide" disabled={busy} onClick={() => onAction('practice')}>Practice vs bots (offline)</Btn>}
-          <Btn variant="go" disabled={busy} onClick={() => onAction('quick')}>Quick Play</Btn>
-          <Btn variant="sky" disabled={busy} onClick={() => onAction('create')}>Create Room</Btn>
-          <Btn disabled={busy} onClick={() => onAction('browse')}>Join Room</Btn>
+          {serverOk !== false && <Btn variant="ghost wide" disabled={busy} onClick={() => onAction('practice')}>Race vs bots (offline)</Btn>}
+          {!OFFLINE_ONLY && (
+            <>
+              <Btn variant="go" disabled={busy || serverOk === false} onClick={() => onAction('quick')}>Quick Play</Btn>
+              <Btn variant="sky" disabled={busy || serverOk === false} onClick={() => onAction('create')}>Create Room</Btn>
+              <Btn disabled={busy || serverOk === false} onClick={() => onAction('browse')}>Join Room</Btn>
+            </>
+          )}
           <Btn variant="ghost" onClick={() => onAction('garage')}>Garage</Btn>
           <Btn variant="ghost" onClick={() => onAction('character')}>Characters</Btn>
           <Btn variant="ghost" onClick={() => onAction('settings')}>Settings</Btn>
