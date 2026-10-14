@@ -14,7 +14,7 @@ import { Results } from './ui/screens/Results';
 import { SettingsPanel } from './ui/screens/SettingsPanel';
 
 type MenuScreen = 'home' | 'name' | 'browse' | 'create' | 'garage';
-type Pending = 'quick' | 'create' | 'browse' | null;
+type Pending = 'quick' | 'create' | 'browse' | 'practice' | null;
 
 function AppInner() {
   const toast = useToast();
@@ -54,6 +54,7 @@ function AppInner() {
 
   const doPending = (p: Pending, name: string) => {
     if (p === 'quick') void run(() => net.quickPlay(name, profileStore.get().appearance));
+    else if (p === 'practice') void run(() => net.practice(name, profileStore.get().appearance));
     else if (p === 'create') setScreen('create');
     else if (p === 'browse') setScreen('browse');
     else setScreen('home');
@@ -65,7 +66,7 @@ function AppInner() {
       setGarageTab(a === 'character' ? 'driver' : 'car');
       return setScreen('garage');
     }
-    const p: Pending = a === 'play' || a === 'quick' ? 'quick' : a === 'create' ? 'create' : 'browse';
+    const p: Pending = a === 'practice' ? 'practice' : a === 'play' || a === 'quick' ? 'quick' : a === 'create' ? 'create' : 'browse';
     if (!profile.name) { setPending(p); setScreen('name'); return; }
     doPending(p, profile.name);
   };
@@ -88,7 +89,7 @@ function AppInner() {
           snap={results}
           myId={myId}
           onRematch={() => { net.send(MSG.REMATCH); setResults(null); }}
-          onLobby={() => { net.send(MSG.TO_LOBBY); setResults(null); }}
+          onLobby={() => { if (net.offline) { void leave(); return; } net.send(MSG.TO_LOBBY); setResults(null); }}
           onLeave={leave}
         />
       );
@@ -100,7 +101,7 @@ function AppInner() {
   } else if (screen === 'name') {
     content = (
       <NameEntry
-        continueLabel={pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
+        continueLabel={pending === 'practice' ? 'Start racing' : pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
         onBack={() => setScreen('home')}
         onGarage={() => { setGarageTab('car'); setScreen('garage'); }}
         onContinue={(name) => doPending(pending, name)}

@@ -1,6 +1,7 @@
 import { Client, Room } from 'colyseus.js';
 import { useSyncExternalStore } from 'react';
-import { MSG, ROOM_NAME, type Appearance, type FxMessage, type RaceSettings } from '@wobble/shared';
+import { DEFAULT_SETTINGS, MSG, ROOM_NAME, type Appearance, type FxMessage, type RaceSettings } from '@wobble/shared';
+import { LocalRoom } from './LocalRoom';
 
 export function serverUrls() {
   const env = (import.meta.env.VITE_SERVER_URL as string | undefined)?.trim();
@@ -142,7 +143,7 @@ class NetSession {
     this.myId = room.sessionId;
     this.status = 'connected';
     this.lastError = '';
-    try { sessionStorage.setItem(RECONNECT_KEY, JSON.stringify({ token: room.reconnectionToken, at: Date.now() })); } catch { /* ignore */ }
+    if (!this.offline) try { sessionStorage.setItem(RECONNECT_KEY, JSON.stringify({ token: room.reconnectionToken, at: Date.now() })); } catch { /* ignore */ }
     room.onStateChange(() => {
       this.patchListeners.forEach((l) => l());
       this.queueNotify();
@@ -204,6 +205,7 @@ class NetSession {
 
   private async connect(fn: () => Promise<Room<any>>) {
     if (this.room) await this.leave();
+    this.offline = false;
     this.status = 'connecting';
     this.lastError = '';
     this.emit();
@@ -216,6 +218,14 @@ class NetSession {
       this.emit();
       throw new Error(this.lastError);
     }
+  }
+
+  /** Offline practice against in-browser bots (no server needed). */
+  offline = false;
+  async practice(name: string, appearance: Appearance, settings: Partial<RaceSettings> = {}, bots = 7) {
+    if (this.room) await this.leave();
+    this.offline = true;
+    this.bind(new LocalRoom(name || 'You', appearance, { ...DEFAULT_SETTINGS, laps: 2, ...settings }, bots) as unknown as Room<any>);
   }
 
   quickPlay(name: string, appearance: Appearance) {

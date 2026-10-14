@@ -1,6 +1,7 @@
 import { RacerStatus, VEHICLES, characterInfo } from '@wobble/shared';
 import type { RoomSnap } from '../../net/Net';
 import { ordinal } from '../../game/Game';
+import { net } from '../../net/Net';
 import { Btn, Thumb } from '../components/common';
 
 export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: RoomSnap; myId: string; onRematch: () => void; onLobby: () => void; onLeave: () => void }) {
@@ -42,9 +43,9 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
           })}
         </div>
         <div className="lobby-actions">
-          <Btn variant="ghost" onClick={onLeave}>Leave room</Btn>
-          <Btn onClick={onLobby}>Return to lobby</Btn>
-          <Btn variant="go" onClick={onRematch}>Rematch (ready up)</Btn>
+          {!net.offline && <Btn variant="ghost" onClick={onLeave}>Leave room</Btn>}
+          <Btn onClick={onLobby}>{net.offline ? 'Main menu' : 'Return to lobby'}</Btn>
+          <Btn variant="go" onClick={onRematch}>{net.offline ? 'Race again' : 'Rematch (ready up)'}</Btn>
         </div>
       </div>
     </div>

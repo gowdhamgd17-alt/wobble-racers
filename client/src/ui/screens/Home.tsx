@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Btn } from '../components/common';
 import { SERVER_MISSING_MSG, checkServer } from '../../net/Net';
 
-export type HomeAction = 'play' | 'quick' | 'create' | 'browse' | 'garage' | 'character' | 'settings';
+export type HomeAction = 'practice' | 'play' | 'quick' | 'create' | 'browse' | 'garage' | 'character' | 'settings';
 
 export function Home({ name, onAction, busy }: { name: string; onAction: (a: HomeAction) => void; busy: boolean }) {
   const title = 'WOBBLE RACERS';
@@ -27,15 +27,21 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
         </div>
         {serverOk === false && (
           <div className="card server-banner" role="alert">
-            <h3>Game server offline</h3>
-            <p className="small">{SERVER_MISSING_MSG()}</p>
-            <p className="small muted" style={{ color: '#555b8a', marginTop: 6 }}>Garage and Settings still work. See README → Deployment.</p>
+            <h3>Online multiplayer is offline</h3>
+            <p className="small">You can still race right now against 7 bots. {SERVER_MISSING_MSG()}</p>
           </div>
         )}
         <div className="home-grid">
-          <Btn variant="primary big wide" disabled={busy} onClick={() => onAction('play')}>
-            {name ? `Play now as ${name}` : 'Play now'}
-          </Btn>
+          {serverOk === false ? (
+            <Btn variant="primary big wide" disabled={busy} onClick={() => onAction('practice')}>
+              Play now vs bots
+            </Btn>
+          ) : (
+            <Btn variant="primary big wide" disabled={busy} onClick={() => onAction('play')}>
+              {name ? `Play now as ${name}` : 'Play now'}
+            </Btn>
+          )}
+          {serverOk !== false && <Btn variant="ghost wide" disabled={busy} onClick={() => onAction('practice')}>Practice vs bots (offline)</Btn>}
           <Btn variant="go" disabled={busy} onClick={() => onAction('quick')}>Quick Play</Btn>
           <Btn variant="sky" disabled={busy} onClick={() => onAction('create')}>Create Room</Btn>
           <Btn disabled={busy} onClick={() => onAction('browse')}>Join Room</Btn>
