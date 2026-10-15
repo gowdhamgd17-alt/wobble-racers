@@ -30,6 +30,7 @@ export interface InputState {
   fire: boolean;
   recover: boolean;
   reload?: boolean;
+  weapon?: number; // gun the player wants in hand (0..9), -1 / undefined = no change
 }
 
 export const NEUTRAL_INPUT: InputState = Object.freeze({
@@ -100,6 +101,7 @@ export function sanitizeInput(raw: unknown): InputState | null {
     fire: r.fire === true,
     recover: r.recover === true,
     reload: r.reload === true,
+    weapon: typeof r.weapon === 'number' && Number.isInteger(r.weapon) && r.weapon >= 0 && r.weapon < 10 ? r.weapon : -1,
   };
 }
 
@@ -161,11 +163,11 @@ export function stepVehicle(
     s.vz *= Math.exp(-3 * dt);
     s.overturnT -= dt;
     if (s.overturnT <= 0) {
+      // Hop and roll back onto the wheels in the air (smoothly, instead of snapping upright).
       s.overturnT = 0;
-      s.roll = 0;
-      s.pitch = 0;
-      s.rollRate = 0;
-      s.pitchRate = 0;
+      const tAir = (2 * cfg.recoveryHop) / PHYS.gravity;
+      s.rollRate = clamp(-wrapAngle(s.roll) / (tAir * 0.8), -PHYS.maxSpinRate, PHYS.maxSpinRate);
+      s.pitchRate = clamp(-wrapAngle(s.pitch) / (tAir * 0.8), -PHYS.maxSpinRate, PHYS.maxSpinRate);
       s.vy = cfg.recoveryHop;
       s.grounded = false;
     }

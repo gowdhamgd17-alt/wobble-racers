@@ -12,7 +12,7 @@ function player(id: string, carClass = 'drifter', weapon = 'm4', order = 0): Sim
     x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, yawRate: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
     grounded: true, overturnT: 0, rampVy: 0, padCooldown: 0, boosting: false, drifting: false,
     health: 100, maxHealth: 100, nitro: 50, fireCd: 0, protectT: 0, respawnT: 0,
-    curWeapon: weapon, ammo: 0, reloadT: 0, kills: 0, deaths: 0,
+    curWeapon: weapon, ammo: 0, reloadT: 0, kills: 0, deaths: 0, powerT: 0,
     laps: 0, nextCp: 1, progress: 0, rank: 0, finishPlace: 0, ackSeq: 0, joinOrder: order,
   };
 }
@@ -178,7 +178,7 @@ describe('game simulation', () => {
     expect(me.p.ammo).toBe(mag);
   });
 
-  it('repairs a damaged car that drives over a repair kit, and crates swap the gun', () => {
+  it('repairs a damaged car that drives over a repair kit, and power crates reload and boost', () => {
     const { sim, racers } = makeSim({ mode: 'battle' }, 2, { human: true, weapons: ['m4'] });
     run(sim, 3.2);
     const me = racers[0];
@@ -191,10 +191,13 @@ describe('game simulation', () => {
     me.veh.x += 30;
     for (let i = 0; i < 9 * 30; i++) sim.tick(SIM_DT);
     expect(kit.active).toBe(true);
+    me.p.ammo = 3;
     const crate = sim.pickups.find((p) => p.kind === 'crate')!;
     me.veh.x = crate.x; me.veh.z = crate.z; me.veh.vx = me.veh.vz = 0;
     sim.tick(SIM_DT);
-    expect(me.p.curWeapon).not.toBe('m4');
+    expect(me.p.curWeapon).toBe('m4');
+    expect(me.p.ammo).toBe(getWeapon('m4').magazine);
+    expect(me.p.powerT).toBeGreaterThan(10);
   });
 
   it('a rocket blast damages and launches nearby cars but never its owner', () => {
@@ -217,5 +220,36 @@ describe('game simulation', () => {
     expect(me.p.health).toBe(meHp);
     expect(a.p.health).toBeLessThan(aHp);
     expect(b.p.health).toBeLessThan(bHp);
+  });
+
+  it('every vehicle can switch to any of the 10 guns mid-game, each keeping its own magazine', () => {
+    const { sim, racers } = makeSim({ mode: 'battle' }, 2, { human: true, weapons: ['m4'] });
+    run(sim, 3.2);
+    const me = racers[0];
+    let seq = 1;
+    const send = (inp: Partial<typeof NEUTRAL_INPUT>, ticks = 1) => {
+      for (let i = 0; i < ticks; i++) { me.queue.push({ seq: seq++, input: { ...NEUTRAL_INPUT, ...inp } }); sim.tick(SIM_DT); }
+    };
+    for (const w of WEAPONS) {
+      send({ weapon: w.index }, 1);
+      expect(me.p.curWeapon).toBe(w.id);
+      expect(me.p.ammo).toBe(w.magazine);
+    }
+    // fire a few pistol rounds, swap away and back: the pistol magazine is remembered
+    send({ weapon: 0 }, 20);
+    send({ weapon: 0, fire: true }, 4);
+    const left = me.p.ammo;
+    expect(left).toBeLessThan(getWeapon('pistol').magazine);
+    send({ weapon: 2 }, 20);
+    send({ weapon: 0 }, 2);
+    expect(me.p.ammo).toBe(left);
+    // the choice survives a respawn
+    sim.damage(me, 1e6, 'test');
+    send({ weapon: -1 }, 120);
+    expect(me.p.curWeapon).toBe('pistol');
+    expect(me.p.ammo).toBe(getWeapon('pistol').magazine);
+    // wire format round trip
+    expect(decodeInput(encodeInput(1, { ...NEUTRAL_INPUT, weapon: 9, fire: true }))?.input.weapon).toBe(9);
+    expect(decodeInput(encodeInput(1, { ...NEUTRAL_INPUT }))?.input.weapon).toBe(-1);
   });
 });

@@ -51,7 +51,7 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
           <Btn variant="ghost" onClick={() => onAction('settings')}>Settings</Btn>
         </div>
         <p className="muted small" style={{ textAlign: 'center' }}>
-          Desktop: <span className="kbd">W A S D</span> drive · <span className="kbd">Space</span> drift · <span className="kbd">Shift</span> nitro · <span className="kbd">F</span> fire · <span className="kbd">R</span> reload. Phones & tablets get touch controls.
+          Desktop: <span className="kbd">W A S D</span> drive · <span className="kbd">Space</span> drift · <span className="kbd">Shift</span> nitro · <span className="kbd">F</span> fire · <span className="kbd">R</span> reload · <span className="kbd">1</span>–<span className="kbd">0</span> / <span className="kbd">Q</span> <span className="kbd">E</span> switch gun. Phones & tablets get touch controls.
         </p>
       </div>
     </div>

@@ -5,8 +5,8 @@
 import * as THREE from 'three';
 import {
   MSG, NEUTRAL_INPUT, autopilot, Phase, RacerStatus, SIM_DT, cloneVehicleState, createVehicleState, damageState,
-  encodeInput, findArenaSpot, findSafeSpot, getVehicle, getWeapon, getWorld, isArena, arenaRay, obbOverlap, placeInArena,
-  placeOnTrack, queryTrack, stepVehicle, colorHex, weaponByIndex,
+  encodeInput, constrainToWorld, resolveCarCollision, findArenaSpot, findSafeSpot, getVehicle, getWeapon, getWorld, isArena, arenaRay, obbOverlap, placeInArena,
+  placeOnTrack, queryTrack, stepVehicle, colorHex, weaponByIndex, WEAPONS,
   type Arena, type FxMessage, type InputState, type KillEvent, type Track, type VehicleState, type World,
 } from '@wobble/shared';
 import { net } from '../net/Net';
@@ -54,7 +54,9 @@ export interface HudData {
   maxHealth: number;
   weaponId: string;
   weaponName: string;
-  ownWeapon: boolean; // false while carrying a crate weapon
+  ownWeapon: boolean;
+  weaponIndex: number; // selected gun (0..9)
+  powerT: number; // seconds of power-crate damage boost left
   ammo: number;
   magazine: number;
   reloading: number; // 0..1 progress, 0 when not reloading
@@ -69,7 +71,7 @@ export interface HudData {
   killedBy: string;
 }
 
-interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; roll: number }
+interface Snap { t: number; x: number; y: number; z: number; yaw: number; pitch: number; roll: number; vx: number; vy: number; vz: number; yawRate: number; grounded: boolean }
 
 const tmpV = new THREE.Vector3();
 const tmpV2 = new THREE.Vector3();
@@ -85,6 +87,7 @@ const C_BRASS = new THREE.Color('#d9a93a');
 const C_GOLD = new THREE.Color('#ffd23f');
 const C_REPAIR = new THREE.Color('#4dff9a');
 const tmpV3 = new THREE.Vector3();
+const tmpM = new THREE.Matrix4();
 
 function distToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
   const dx = bx - ax, dz = bz - az;
@@ -297,6 +300,7 @@ export class Game {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(container);
     window.addEventListener('resize', this.resize);
+    window.addEventListener('keydown', this.onKey);
     window.visualViewport?.addEventListener('resize', this.resize);
     document.addEventListener('fullscreenchange', this.resize);
     this.resize();
@@ -354,6 +358,7 @@ export class Game {
     this.unsub.forEach((u) => u());
     this.ro?.disconnect();
     window.removeEventListener('resize', this.resize);
+    window.removeEventListener('keydown', this.onKey);
     window.visualViewport?.removeEventListener('resize', this.resize);
     document.removeEventListener('fullscreenchange', this.resize);
     for (const c of this.cars.values()) c.dispose(this.scene);
@@ -463,7 +468,14 @@ export class Game {
         c.yaw = p.yaw;
       }
       if (id !== net.myId) {
-        c.buf.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll });
+        // A recover / respawn teleport: jump there instead of sliding across the map.
+        const last = c.buf[c.buf.length - 1];
+        if (last && (last.x - p.x) ** 2 + (last.z - p.z) ** 2 > 15 * 15) {
+          c.buf.length = 0;
+          c.pos.set(p.x, p.y, p.z);
+          c.yaw = p.yaw;
+        }
+        c.buf.push({ t: now, x: p.x, y: p.y, z: p.z, yaw: p.yaw, pitch: p.pitch, roll: p.roll, vx: p.vx, vy: p.vy, vz: p.vz, yawRate: p.yawRate, grounded: p.grounded });
         if (c.buf.length > 30) c.buf.shift();
         c.speed = Math.hypot(p.vx, p.vz);
         c.steerVis = Math.max(-1, Math.min(1, -p.yawRate / 2));
@@ -480,6 +492,8 @@ export class Game {
       this.killFeed = [];
       this.saavu = null;
       this.killedBy = '';
+      const mine = st.players?.get(net.myId);
+      this.desiredWeapon = mine ? getWeapon(mine.weapon).index : -1;
     }
     this.reconcile();
   }
@@ -511,10 +525,12 @@ export class Game {
     while (this.pending.length && this.pending[0].seq <= ack) this.pending.shift();
     const rules = { nitro: st.settings.nitro, drift: st.settings.drift };
     const cfg = getVehicle(me.carClass);
-    for (const p of this.pending) stepVehicle(server, p.input, cfg, this.world, rules, SIM_DT);
+    this.pending.forEach((p, i) => this.predictStep(server, p.input, cfg, rules, (i + 1) * SIM_DT));
     if (this.predicting) {
       const dx = oldX - server.x, dy = oldY - server.y, dz = oldZ - server.z;
-      if (dx * dx + dy * dy + dz * dz < 36) {
+      const err2 = dx * dx + dy * dy + dz * dz;
+      if (err2 > 0.25) this.corrections++;
+      if (err2 < 36) {
         this.visOffset.x += dx; this.visOffset.y += dy; this.visOffset.z += dz;
         this.visYawOffset = lerpAngle(0, oldYaw - server.yaw, 1) + this.visYawOffset;
         this.prevPred.x -= dx; this.prevPred.y -= dy; this.prevPred.z -= dz;
@@ -529,6 +545,38 @@ export class Game {
     this.predicting = true;
   }
 
+  /**
+   * One predicted step of my own car, including bumping into the other cars
+   * (at their last synced positions, moved on by their velocity). Without this
+   * the prediction drives straight into a rival and the server's correction
+   * yanks it back every patch, which looks like jittering when cars touch.
+   */
+  private predictStep(s: VehicleState, inp: InputState, cfg: ReturnType<typeof getVehicle>, rules: { nitro: boolean; drift: boolean }, ahead: number) {
+    const ev = stepVehicle(s, inp, cfg, this.world, rules, SIM_DT);
+    const st = net.room?.state;
+    if (!st?.settings?.collisions || this.myStatus !== RacerStatus.RACING) return ev;
+    const since = Math.min(0.15, (performance.now() - this.lastPatchT) / 1000) + ahead;
+    let hit = false;
+    st.players.forEach((p: any, id: string) => {
+      if (id === net.myId || p.status !== RacerStatus.RACING) return;
+      const o = this.otherTmp;
+      Object.assign(o, { x: p.x + p.vx * since, y: p.y, z: p.z + p.vz * since, vx: p.vx, vy: p.vy, vz: p.vz, yaw: p.yaw, yawRate: p.yawRate, grounded: p.grounded, boosting: p.boosting, overturnT: p.overturnT });
+      const ocfg = getVehicle(p.carClass);
+      if (Math.abs(o.x - s.x) > 8 || Math.abs(o.z - s.z) > 8) return;
+      // Only my car is moved; the other is the server's business.
+      const before = { y: s.y, vy: s.vy, grounded: s.grounded, rollRate: s.rollRate, pitchRate: s.pitchRate };
+      const res = resolveCarCollision(s, o, cfg, ocfg);
+      if (res.hit) hit = true;
+      // Launches are decided by the server (it knows both cars exactly); don't guess them here.
+      if (res.launchedA) Object.assign(s, before);
+    });
+    if (hit) constrainToWorld(s, cfg, this.world);
+    return ev;
+  }
+  /** Debug: how often the server noticeably corrected my predicted car. */
+  corrections = 0;
+  private otherTmp: VehicleState = createVehicleState(0, 0, 0);
+
   // ------------------------------------------------------------ fixed step
   private fixedStep() {
     const st = net.room?.state;
@@ -537,6 +585,17 @@ export class Game {
     if (this.paused || this.blocked) Object.assign(inp, NEUTRAL_INPUT);
     else input.sample(SIM_DT, inp);
     if (this.autodrive && this.predicting && this.track) Object.assign(inp, autopilot(this.pred, this.track));
+    // Gun switching: number keys pick a gun directly, Q / E (or the touch button) cycle.
+    // (keyboard presses are handled on keydown; this catches the touch button)
+    const nextDown = input.isDown('nextWeapon'), prevDown = input.isDown('prevWeapon');
+    if (this.keyCycled) { this.keyCycled = false; this.nextWasDown = nextDown; this.prevWasDown = prevDown; }
+    if (!this.paused && !this.blocked) {
+      if (nextDown && !this.nextWasDown) this.cycleWeapon(1);
+      if (prevDown && !this.prevWasDown) this.cycleWeapon(-1);
+    }
+    this.nextWasDown = nextDown;
+    this.prevWasDown = prevDown;
+    inp.weapon = this.desiredWeapon;
     const me = st.players?.get(net.myId);
     const live = st.phase === Phase.RACING || st.phase === Phase.COUNTDOWN;
     if (!live || !me || net.status !== 'connected') return;
@@ -546,7 +605,7 @@ export class Game {
     this.pending.push({ seq: this.seq, input: { ...inp } });
     if (this.pending.length > 90) this.pending.shift();
     Object.assign(this.prevPred, this.pred);
-    const ev = stepVehicle(this.pred, inp, getVehicle(me.carClass), this.world, { nitro: st.settings.nitro, drift: st.settings.drift }, SIM_DT);
+    const ev = this.predictStep(this.pred, inp, getVehicle(me.carClass), { nitro: st.settings.nitro, drift: st.settings.drift }, this.pending.length * SIM_DT);
     if (ev.recover) {
       // Predict the recovery; the server's safe-spot choice will reconcile it.
       const nitro = this.pred.nitro;
@@ -708,7 +767,7 @@ export class Game {
         case 'pickup': {
           const w = weaponByIndex(amount);
           for (let i = 0; i < 24; i++) this.glow.emit(x, y, z, (Math.random() - 0.5) * 8, Math.random() * 7, (Math.random() - 0.5) * 8, C_GOLD, 0.6, 0.6, { gravity: 6 });
-          if (isMe) { audio.pickup(); audio.reloaded(w.id); this.banner = w.label.toUpperCase() + '!'; this.bannerT = 1.6; haptic(40); }
+          if (isMe) { audio.pickup(); audio.reloaded(w.id); this.banner = 'POWER UP! ×1.5 DAMAGE'; this.bannerT = 1.6; haptic(40); }
           else if (near) audio.pickup(vol * 0.5);
           break;
         }
@@ -760,6 +819,32 @@ export class Game {
     for (let i = 0; i < n * 0.25; i++) this.smoke.emit(x + (Math.random() - 0.5) * 2, y + 1.5, z + (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3 * scale, 3 + Math.random() * 4, (Math.random() - 0.5) * 3 * scale, Math.random() < 0.5 ? C_DARK_SMOKE : C_SMOKE, 1.5 * scale, 1.6, { grow: 2.2, drag: 1.4 });
     this.debris.burst(x, y, z, ['#3a3a3a', '#6b5a45', '#2a2a33'], Math.round(6 * scale));
   }
+
+  private desiredWeapon = -1;
+  private nextWasDown = false;
+  private keyCycled = false;
+  private prevWasDown = false;
+  /** Pick a gun by index (0..9). Every vehicle carries all ten. */
+  selectWeapon(i: number) {
+    if (i < 0 || i >= WEAPONS.length) return;
+    if (i !== this.desiredWeapon) audio.click();
+    this.desiredWeapon = i;
+    this.emitHud();
+  }
+  cycleWeapon(dir: number) {
+    const cur = this.desiredWeapon >= 0 ? this.desiredWeapon : getWeapon(net.room?.state?.players?.get(net.myId)?.curWeapon ?? 'm4').index;
+    this.selectWeapon((cur + dir + WEAPONS.length) % WEAPONS.length);
+  }
+  private onKey = (e: KeyboardEvent) => {
+    if (this.paused || this.blocked || e.repeat) return;
+    const b = settingsStore.get().bindings;
+    if (b.nextWeapon.includes(e.code)) { this.cycleWeapon(1); this.keyCycled = true; return; }
+    if (b.prevWeapon.includes(e.code)) { this.cycleWeapon(-1); this.keyCycled = true; return; }
+    const m = /^Digit(\d)$/.exec(e.code) ?? /^Numpad(\d)$/.exec(e.code);
+    if (!m) return;
+    const n = Number(m[1]);
+    this.selectWeapon(n === 0 ? 9 : n - 1);
+  };
 
   private onKill(list: KillEvent[]) {
     const st = net.room?.state;
@@ -918,10 +1003,21 @@ export class Game {
     if (!b.length) return;
     let i = b.length - 1;
     while (i > 0 && b[i - 1].t > renderT) i--;
-    if (i === 0 || b[i].t <= renderT) {
-      const s = b[b.length - 1];
+    if (i === 0) {
+      // Not enough history yet: hold the oldest sample (never jump ahead and back).
+      const s = b[0];
       c.pos.set(s.x, s.y, s.z);
       c.yaw = s.yaw; c.pitch = s.pitch; c.roll = s.roll;
+      return;
+    }
+    if (b[i].t <= renderT) {
+      // The next update is late: keep the car moving along its velocity for a moment
+      // instead of freezing and then jumping.
+      const s = b[b.length - 1];
+      const dt = Math.min(0.12, (renderT - s.t) / 1000);
+      const vy = s.grounded ? 0 : s.vy;
+      c.pos.set(s.x + s.vx * dt, Math.max(0, s.y + vy * dt), s.z + s.vz * dt);
+      c.yaw = s.yaw + s.yawRate * dt; c.pitch = s.pitch; c.roll = s.roll;
       return;
     }
     const a = b[i - 1], s = b[i];
@@ -940,7 +1036,22 @@ export class Game {
     P.root.position.copy(c.pos);
     if (c.status === RacerStatus.RACING) P.root.position.add(c.vis);
     P.root.rotation.set(0, c.yaw, 0);
+    // Tip and roll around the middle of the body, not the ground point, so a
+    // car that flips or lands on its roof stays above the road instead of sinking into it.
     P.tilt.rotation.set(c.pitch, 0, c.roll, 'YXZ');
+    const pivot = P.topY * 0.5;
+    tmpV2.set(0, pivot, 0).applyEuler(P.tilt.rotation);
+    P.tilt.position.set(-tmpV2.x, pivot - tmpV2.y, -tmpV2.z);
+    // While tumbling, keep the rotated body's lowest corner out of the ground.
+    if (!c.grounded || Math.abs(c.roll) > 0.6 || Math.abs(c.pitch) > 0.6) {
+      tmpM.makeRotationFromEuler(P.tilt.rotation);
+      const e = tmpM.elements;
+      const extentY = c.hw * Math.abs(e[1]) + pivot * Math.abs(e[5]) + c.hl * Math.abs(e[9]);
+      const t = this.track;
+      const groundY = t ? Math.max(0, queryTrack(t, c.pos.x, c.pos.z).height) : 0;
+      const lift = extentY - pivot - (P.root.position.y - groundY);
+      if (lift > 0) P.tilt.position.y += lift;
+    }
     // body + wheels hidden while destroyed; the driver gets ejected cartoon-style
     P.body.visible = !destroyed;
     for (const w of P.wheels) w.parent!.visible = !destroyed;
@@ -1209,7 +1320,9 @@ export class Game {
       maxHealth: me?.maxHealth ?? 100,
       weaponId: w.id,
       weaponName: w.label,
-      ownWeapon: !me || me.curWeapon === me.weapon,
+      ownWeapon: true,
+      weaponIndex: this.desiredWeapon >= 0 ? this.desiredWeapon : w.index,
+      powerT: me?.powerT ?? 0,
       ammo: me?.ammo ?? 0,
       magazine: w.magazine,
       reloading: me && me.reloadT > 0 ? 1 - me.reloadT / w.reload : 0,

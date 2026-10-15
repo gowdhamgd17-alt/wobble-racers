@@ -17,7 +17,7 @@ import { initialProgress, progressScore, totalLapsFor, updateProgress, type Prog
 import { getTrack, pointAt, queryTrack, trackName, type Track } from './track';
 import { getArena, type Arena } from './arena';
 import { getVehicle } from './vehicles';
-import { CRATE_WEAPONS, MUZZLE_HEIGHT, getWeapon, type WeaponDef } from './weapons';
+import { MUZZLE_HEIGHT, WEAPONS, getWeapon, type WeaponDef } from './weapons';
 import { autopilot } from './autopilot';
 import type { RaceSettings } from './validation';
 
@@ -46,7 +46,7 @@ export interface SimPlayer {
   yaw: number; yawRate: number; pitch: number; roll: number; pitchRate: number; rollRate: number;
   grounded: boolean; overturnT: number; rampVy: number; padCooldown: number; boosting: boolean; drifting: boolean;
   health: number; maxHealth: number; nitro: number; fireCd: number; protectT: number; respawnT: number;
-  curWeapon: string; ammo: number; reloadT: number; kills: number; deaths: number;
+  curWeapon: string; ammo: number; reloadT: number; kills: number; deaths: number; powerT: number;
   laps: number; nextCp: number; progress: number; rank: number; finishPlace: number; ackSeq: number; joinOrder: number;
 }
 
@@ -64,6 +64,8 @@ export interface BotBrain {
   revSteer: number;
   wanderX: number;
   wanderZ: number;
+  gunT: number; // time until the bot reconsiders which gun to hold
+  gun: number;
 }
 
 export interface SimRacer {
@@ -81,7 +83,7 @@ export interface SimRacer {
   lastHitBy: string;
   lastHitT: number;
   lastHitWeapon: string;
-  crateMags: number;
+  mags: number[]; // rounds left in each gun's magazine (index = weapon index)
 }
 
 export interface SimProjectile {
@@ -108,7 +110,7 @@ export function createSimRacer(id: string, p: SimPlayer, bot = false, order = 0)
     id, p, veh: createVehicleState(0, 0, 0), prog: initialProgress(), input: { ...NEUTRAL_INPUT }, queue: [],
     bot: bot ? makeBrain(order) : null,
     destroyedT: 0, deathF: 0, deathLat: 0, deathYaw: 0, deathX: 0, deathZ: 0, lastRank: order + 1, overtakeCd: 0,
-    lastHitBy: '', lastHitT: -99, lastHitWeapon: '', crateMags: 0,
+    lastHitBy: '', lastHitT: -99, lastHitWeapon: '', mags: WEAPONS.map((w) => w.magazine),
   };
 }
 
@@ -116,9 +118,13 @@ export function makeBrain(order: number): BotBrain {
   return {
     lane: ((order % 5) - 2) * 2.6, skill: 0.82 + ((order * 37) % 17) / 100, reaction: 0.25 + ((order * 13) % 7) / 18,
     aimT: 0, targetId: '', retargetT: 0, heading: 0, thinkT: order % 3, stuckT: 0, reverseT: 0, revSteer: 1,
-    wanderX: 0, wanderZ: 0,
+    wanderX: 0, wanderZ: 0, gunT: 0, gun: -1,
   };
 }
+
+const powerMul = (r: SimRacer) => ((r.p.powerT ?? 0) > 0 ? PICKUP.powerDamage : 1);
+/** Seconds to swap guns. */
+export const WEAPON_SWITCH_TIME = 0.4;
 
 /** Seconds after the green light before anyone can shoot in a race. */
 export const RACE_WEAPON_HOLD = 5;
@@ -225,6 +231,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
       p.rank = i + 1;
       p.kills = 0;
       p.deaths = 0;
+      p.powerT = 0;
       this.resetWeapons(r);
       this.sync(r);
     });
@@ -261,6 +268,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
 
     for (const r of this.racers.values()) {
       const p = r.p;
+      let steps = 1;
       if (r.bot) {
         if (p.status === RacerStatus.RACING) r.input = this.battle ? this.battleBot(r, dt) : this.raceBot(r, dt);
         else if (p.status === RacerStatus.FINISHED && this.track) r.input = autopilot(r.veh, this.track, 9, r.bot.lane);
@@ -268,9 +276,14 @@ export class GameSim<R extends SimRacer = SimRacer> {
       } else {
         const next = r.queue.shift();
         if (next) { r.input = next.input; p.ackSeq = next.seq; }
+        // A client whose clock runs a little fast builds a backlog: catch up with an
+        // extra step instead of later dropping inputs (dropped inputs = rubber-banding).
+        if (r.queue.length > 2) steps = 2;
       }
-      if (!p.connected || p.status === RacerStatus.LEFT || p.status === RacerStatus.DISCONNECTED) r.input = { ...NEUTRAL_INPUT };
+      const offline = !p.connected || p.status === RacerStatus.LEFT || p.status === RacerStatus.DISCONNECTED;
+      if (offline) r.input = { ...NEUTRAL_INPUT };
       p.protectT = Math.max(0, p.protectT - dt);
+      p.powerT = Math.max(0, (p.powerT ?? 0) - dt);
       r.overtakeCd = Math.max(0, r.overtakeCd - dt);
 
       if (p.status === RacerStatus.DESTROYED) {
@@ -280,40 +293,14 @@ export class GameSim<R extends SimRacer = SimRacer> {
         continue;
       }
       if (p.status === RacerStatus.LEFT) continue;
-
-      const cfg = getVehicle(p.carClass);
-      const input = r.input;
-      const ev = stepVehicle(r.veh, input, cfg, this.world, rules, dt);
-      const v = r.veh;
-      if (ev.boostPad) this.fx('pad', p.id, v.x, v.y, v.z, 0);
-      if (ev.landingSpeed > PHYS.landingDamageSpeed) {
-        this.damage(r, ((ev.landingSpeed - PHYS.landingDamageSpeed) * 2.5 * IMPACT_DAMAGE_SCALE) / cfg.damageResistance, 'fall');
-      } else if (ev.landingSpeed > 6) {
-        this.fx('land', p.id, v.x, v.y, v.z, ev.landingSpeed);
+      for (let k = 0; k < steps; k++) {
+        if (k > 0) {
+          const next = r.queue.shift();
+          if (next && !offline) { r.input = next.input; p.ackSeq = next.seq; }
+        }
+        this.stepRacer(r, dt, rules);
+        if (p.status === RacerStatus.DESTROYED) break;
       }
-      if (ev.wallImpact > PHYS.wallDamageSpeed) {
-        this.damage(r, ((ev.wallImpact - PHYS.wallDamageSpeed) * 0.8 * IMPACT_DAMAGE_SCALE) / cfg.damageResistance, 'wall');
-        this.fx('wall', p.id, v.x, v.y + 0.5, v.z, ev.wallImpact);
-      }
-      if (ev.recover) this.recover(r);
-
-      if (p.status === RacerStatus.RACING) {
-        this.weapons(r, input, dt);
-        this.collectPickups(r);
-      } else {
-        p.reloadT = 0;
-      }
-
-      if (!this.battle && p.status === RacerStatus.RACING) {
-        const t = this.track!;
-        const q = queryTrack(t, v.x, v.z, v.trackIdx);
-        const pe = updateProgress(t, r.prog, q.f, q.lateral, totalLapsFor(t, st.laps));
-        if (pe === 'lap') this.fx('lap', p.id, v.x, v.y, v.z, r.prog.laps);
-        if (pe === 'finish') this.finish(r);
-        p.progress = progressScore(t, r.prog, q.f);
-      }
-      p.laps = r.prog.laps;
-      p.nextCp = r.prog.nextCp;
     }
 
     if (st.collisions) {
@@ -334,6 +321,46 @@ export class GameSim<R extends SimRacer = SimRacer> {
     this.updateRanks();
     for (const r of this.racers.values()) this.sync(r);
     this.checkComplete();
+  }
+
+  /** One fixed step of one car: driving, damage from landings / walls, weapons, pickups, race progress. */
+  private stepRacer(r: SimRacer, dt: number, rules: { nitro: boolean; drift: boolean }) {
+    const p = r.p;
+    const st = this.settings;
+    const cfg = getVehicle(p.carClass);
+    const input = r.input;
+    const ev = stepVehicle(r.veh, input, cfg, this.world, rules, dt);
+    const v = r.veh;
+    if (ev.boostPad) this.fx('pad', p.id, v.x, v.y, v.z, 0);
+    if (ev.landingSpeed > PHYS.landingDamageSpeed) {
+      this.damage(r, ((ev.landingSpeed - PHYS.landingDamageSpeed) * 2.5 * IMPACT_DAMAGE_SCALE) / cfg.damageResistance, 'fall');
+    } else if (ev.landingSpeed > 6) {
+      this.fx('land', p.id, v.x, v.y, v.z, ev.landingSpeed);
+    }
+    if (ev.wallImpact > PHYS.wallDamageSpeed) {
+      this.damage(r, ((ev.wallImpact - PHYS.wallDamageSpeed) * 0.8 * IMPACT_DAMAGE_SCALE) / cfg.damageResistance, 'wall');
+      this.fx('wall', p.id, v.x, v.y + 0.5, v.z, ev.wallImpact);
+    }
+    if (ev.recover) this.recover(r);
+
+    if (p.status === RacerStatus.RACING) {
+      if (input.weapon !== undefined && input.weapon >= 0) this.selectWeapon(r, input.weapon);
+      this.weapons(r, input, dt);
+      this.collectPickups(r);
+    } else {
+      p.reloadT = 0;
+    }
+
+    if (!this.battle && p.status === RacerStatus.RACING) {
+      const t = this.track!;
+      const q = queryTrack(t, v.x, v.z, v.trackIdx);
+      const pe = updateProgress(t, r.prog, q.f, q.lateral, totalLapsFor(t, st.laps));
+      if (pe === 'lap') this.fx('lap', p.id, v.x, v.y, v.z, r.prog.laps);
+      if (pe === 'finish') this.finish(r);
+      p.progress = progressScore(t, r.prog, q.f);
+    }
+    p.laps = r.prog.laps;
+    p.nextCp = r.prog.nextCp;
   }
 
   private collideCars() {
@@ -357,14 +384,31 @@ export class GameSim<R extends SimRacer = SimRacer> {
 
   // ---------------------------------------------------------------- weapons
 
+  /** Fresh car: every gun fully loaded, holding the gun you last chose. */
   resetWeapons(r: SimRacer) {
     const p = r.p;
     p.curWeapon = getWeapon(p.weapon).id;
     p.weapon = p.curWeapon;
+    r.mags = WEAPONS.map((w) => w.magazine);
     p.ammo = getWeapon(p.curWeapon).magazine;
     p.reloadT = 0;
     p.fireCd = 0;
-    r.crateMags = 0;
+  }
+
+  /** Every vehicle carries all ten guns; switching takes a moment and cancels a reload. */
+  selectWeapon(r: SimRacer, index: number) {
+    const p = r.p;
+    const w = WEAPONS[Math.round(index)];
+    if (!w || w.id === p.curWeapon) return;
+    if (!r.mags || r.mags.length !== WEAPONS.length) r.mags = WEAPONS.map((x) => x.magazine);
+    r.mags[getWeapon(p.curWeapon).index] = p.reloadT > 0 ? 0 : p.ammo;
+    p.curWeapon = w.id;
+    p.weapon = w.id;
+    p.ammo = r.mags[w.index];
+    p.reloadT = 0;
+    p.fireCd = WEAPON_SWITCH_TIME;
+    this.fx('reloaded', p.id, r.veh.x, r.veh.y + 1, r.veh.z, w.index);
+    if (p.ammo <= 0) this.startReload(r);
   }
 
   private weapons(r: SimRacer, input: InputState, dt: number) {
@@ -376,6 +420,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
       if (p.reloadT <= 0) {
         p.reloadT = 0;
         p.ammo = w.magazine;
+        if (r.mags) r.mags[w.index] = p.ammo;
         this.fx('reloaded', p.id, r.veh.x, r.veh.y + 1, r.veh.z, w.index);
       }
       return;
@@ -393,6 +438,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
       if (p.ammo <= 0) return this.startReload(r);
       this.shoot(r, w);
       p.ammo -= 1;
+      if (r.mags) r.mags[w.index] = p.ammo;
       p.fireCd += w.interval;
       shots++;
     }
@@ -401,18 +447,6 @@ export class GameSim<R extends SimRacer = SimRacer> {
 
   private startReload(r: SimRacer) {
     const p = r.p;
-    if (p.curWeapon !== p.weapon) {
-      if (r.crateMags > 0) r.crateMags -= 1;
-      else {
-        // Crate weapon used up: back to your own gun, ready to fire.
-        p.curWeapon = p.weapon;
-        p.ammo = getWeapon(p.weapon).magazine;
-        p.reloadT = 0;
-        p.fireCd = 0.3;
-        this.fx('reloaded', p.id, r.veh.x, r.veh.y + 1, r.veh.z, getWeapon(p.weapon).index);
-        return;
-      }
-    }
     const w = getWeapon(p.curWeapon);
     p.reloadT = w.reload;
     this.fx('reload', p.id, r.veh.x, r.veh.y + 1, r.veh.z, w.index);
@@ -510,7 +544,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
       v.rollRate = (this.rand() - 0.5) * 3;
     }
     if (!quiet || this.rand() < 0.25) this.fx('hit', o.id, v.x, v.y + 0.9, v.z, dmg, w.index);
-    this.damage(o, dmg / Math.sqrt(cfg.damageResistance), w.id, by.id);
+    this.damage(o, (dmg * powerMul(by)) / Math.sqrt(cfg.damageResistance), w.id, by.id);
   }
 
   private groundAt(x: number, z: number, idx: number) {
@@ -618,7 +652,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
       if (self) continue; // no self damage, just a shove
       const dmg = w.splash * k + (direct ? w.damage : 0);
       this.fx('hit', o.id, v.x, v.y + 0.9, v.z, dmg, w.index);
-      if (by) this.damage(o, dmg / Math.sqrt(cfg.damageResistance), w.id, by.id);
+      if (by) this.damage(o, (dmg * powerMul(by)) / Math.sqrt(cfg.damageResistance), w.id, by.id);
       else this.damage(o, dmg / Math.sqrt(cfg.damageResistance), w.id);
     }
   }
@@ -678,14 +712,12 @@ export class GameSim<R extends SimRacer = SimRacer> {
         this.fx('repair', p.id, pk.x, v.y + 1, pk.z, p.health - before);
       } else {
         if (!this.settings.weapons) continue;
-        const options = CRATE_WEAPONS.filter((id) => id !== p.curWeapon);
-        const id = options[Math.floor(this.rand() * options.length) % options.length];
-        const w = getWeapon(id);
-        p.curWeapon = w.id;
+        // Power crate: every gun reloaded instantly and a damage boost for a while.
+        const w = getWeapon(p.curWeapon);
+        r.mags = WEAPONS.map((x) => x.magazine);
         p.ammo = w.magazine;
         p.reloadT = 0;
-        p.fireCd = 0.2;
-        r.crateMags = PICKUP.crateMagazines - 1;
+        p.powerT = PICKUP.powerSeconds;
         pk.active = false;
         pk.timer = PICKUP.crateRespawn;
         this.fx('pickup', p.id, pk.x, v.y + 1, pk.z, w.index);
@@ -913,6 +945,21 @@ export class GameSim<R extends SimRacer = SimRacer> {
     return seen && b.aimT > b.reaction;
   }
 
+  /** Bots pick a gun that suits the range: close, medium or long. */
+  private botGun(r: SimRacer, dt: number, dist: number) {
+    const b = r.bot!;
+    b.gunT -= dt;
+    if (b.gunT > 0 && b.gun >= 0) return b.gun;
+    b.gunT = 3 + this.rand() * 3;
+    const style = r.p.joinOrder % 3;
+    const close = [['shotgun', 'flamer', 'smg'], ['flamer', 'smg', 'shotgun'], ['smg', 'shotgun', 'flamer']][style];
+    const mid = [['m4', 'minigun', 'grenade'], ['minigun', 'm4', 'pistol'], ['grenade', 'm4', 'minigun']][style];
+    const far = [['rocket', 'sniper', 'homing'], ['sniper', 'homing', 'rocket'], ['homing', 'rocket', 'sniper']][style];
+    const set = dist < 22 ? close : dist < 90 ? mid : far;
+    b.gun = getWeapon(set[Math.floor(this.rand() * set.length) % set.length]).index;
+    return b.gun;
+  }
+
   private raceBot(r: SimRacer, dt: number): InputState {
     const b = r.bot!;
     const t = this.track!;
@@ -924,6 +971,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
     inp.recover = speed < 1;
     // Racing bots are pickier: medium range only, and they mostly keep their eyes on the road.
     inp.fire = this.botTrigger(r, dt, 90) && Math.sin(this.time * 0.9 + b.lane) > -0.2;
+    inp.weapon = this.botGun(r, dt, 50);
     const w = getWeapon(r.p.curWeapon);
     inp.reload = !inp.fire && r.p.ammo < w.magazine * 0.25 && b.aimT === 0;
     return inp;
@@ -1025,6 +1073,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
     } else b.stuckT = 0;
     inp.recover = v.overturnT > 0 || (speed < 1 && b.stuckT > 0.9);
 
+    inp.weapon = this.botGun(r, dt, tdist);
     inp.fire = this.botTrigger(r, dt, 250);
     inp.nitro = this.settings.nitro && v.nitro > 30 && Math.abs(diff) < 0.15 && (goal !== 'hunt' || tdist > 60);
     inp.reload = !inp.fire && p.ammo < w.magazine * 0.35 && (goal !== 'hunt' || tdist > w.range);

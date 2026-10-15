@@ -7,7 +7,7 @@ import { settingsStore, type Action } from '../state/store';
 
 export type InputMethod = 'keyboard' | 'touch';
 
-const TOUCH_ACTIONS: Action[] = ['accelerate', 'brake', 'left', 'right', 'drift', 'nitro', 'fire', 'reload', 'recover'];
+const TOUCH_ACTIONS: Action[] = ['accelerate', 'brake', 'left', 'right', 'drift', 'nitro', 'fire', 'reload', 'nextWeapon', 'prevWeapon', 'recover'];
 
 class InputManager {
   private keys = new Set<string>();

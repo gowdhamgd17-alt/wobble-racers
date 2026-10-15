@@ -151,6 +151,17 @@ export function Race({ onLeave }: { onLeave: () => void }) {
               )}
             </div>
           )}
+          {h?.weaponsOn !== false && h && (
+            <div className="gun-bar" role="toolbar" aria-label="Choose gun">
+              {WEAPONS.map((w, i) => (
+                <button key={w.id} className={i === h.weaponIndex ? 'on' : ''} title={`${w.label} (key ${i === 9 ? 0 : i + 1})`} aria-label={w.label} aria-pressed={i === h.weaponIndex}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); gameRef.current?.selectWeapon(i); }}>
+                  <span className="gk">{i === 9 ? 0 : i + 1}</span>{GUN_SHORT[w.id]}
+                </button>
+              ))}
+            </div>
+          )}
+          {h && h.powerT > 0 && <div className="power-badge">⚡ ×1.5 DAMAGE · {Math.ceil(h.powerT)}s</div>}
         </div>
         {h && h.killFeed.length > 0 && (
           <div className="killfeed">
@@ -240,6 +251,10 @@ export function Race({ onLeave }: { onLeave: () => void }) {
   );
 }
 
+const GUN_SHORT: Record<string, string> = {
+  pistol: 'PST', smg: 'SMG', m4: 'M4', shotgun: 'SHT', minigun: 'MIN', sniper: 'SNP', rocket: 'RKT', grenade: 'GRN', flamer: 'FLM', homing: 'HOM',
+};
+
 function weaponLabel(id: string) {
   const names: Record<string, string> = { ram: 'rammed', wall: 'crashed', fall: 'fell', test: 'zapped' };
   if (names[id]) return names[id];
@@ -256,7 +271,7 @@ function TouchControls({ disabledFire, disabledNitro }: { disabledFire: boolean;
   const steerPad = useRef<HTMLDivElement>(null);
   const refresh = () => {
     const s = new Set<Action>();
-    for (const a of ['left', 'right', 'accelerate', 'brake', 'drift', 'nitro', 'fire', 'reload', 'recover'] as Action[]) if (input.isDown(a)) s.add(a);
+    for (const a of ['left', 'right', 'accelerate', 'brake', 'drift', 'nitro', 'fire', 'reload', 'nextWeapon', 'recover'] as Action[]) if (input.isDown(a)) s.add(a);
     setDown(s);
   };
   useEffect(() => () => input.resetAll(), []);
@@ -315,7 +330,7 @@ function TouchControls({ disabledFire, disabledNitro }: { disabledFire: boolean;
         {btn('drift', 'DRIFT', 'small')}
         {btn('brake', 'BRAKE')}
       </div>
-      <div className="top-right-actions">{!disabledFire && btn('reload', 'RELOAD', 'small')}{btn('recover', '⟲', 'small')}</div>
+      <div className="top-right-actions">{!disabledFire && btn('nextWeapon', 'GUN ▸', 'small')}{!disabledFire && btn('reload', 'RELOAD', 'small')}{btn('recover', '⟲', 'small')}</div>
     </div>
   );
 }

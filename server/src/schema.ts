@@ -63,6 +63,7 @@ export class PlayerState extends Schema {
   declare reloadT: number;
   declare kills: number;
   declare deaths: number;
+  declare powerT: number;
   declare nitro: number;
   declare fireCd: number;
   declare protectT: number;
@@ -101,6 +102,7 @@ export class PlayerState extends Schema {
     this.reloadT = 0;
     this.kills = 0;
     this.deaths = 0;
+    this.powerT = 0;
     this.nitro = NITRO.start;
     this.fireCd = 0;
     this.protectT = 0;
@@ -124,7 +126,7 @@ defineTypes(PlayerState, {
   grounded: 'boolean', overturnT: 'float32', rampVy: 'float32', padCooldown: 'float32',
   boosting: 'boolean', drifting: 'boolean',
   health: 'float32', maxHealth: 'uint16', curWeapon: 'string', ammo: 'uint8', reloadT: 'float32',
-  kills: 'uint16', deaths: 'uint16', nitro: 'float32', fireCd: 'float32', protectT: 'float32', respawnT: 'float32',
+  kills: 'uint16', deaths: 'uint16', powerT: 'float32', nitro: 'float32', fireCd: 'float32', protectT: 'float32', respawnT: 'float32',
   laps: 'uint8', nextCp: 'uint8', progress: 'float32', rank: 'uint8', finishPlace: 'uint8',
   ackSeq: 'uint32', joinOrder: 'uint16',
 });

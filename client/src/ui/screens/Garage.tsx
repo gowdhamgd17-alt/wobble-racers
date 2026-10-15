@@ -37,7 +37,7 @@ export function Garage({ onDone, initialTab = 'car', confirmLabel = 'Confirm' }:
             <div className="tabs" role="tablist">
               {(['car', 'weapon', 'paint', 'driver'] as Tab[]).map((t) => (
                 <button key={t} role="tab" aria-selected={tab === t} onClick={() => { audio.click(); setTab(t); }}>
-                  {t === 'car' ? 'Car' : t === 'weapon' ? 'Weapon' : t === 'paint' ? 'Paint' : 'Driver'}
+                  {t === 'car' ? 'Car' : t === 'weapon' ? 'Starting gun' : t === 'paint' ? 'Paint' : 'Driver'}
                 </button>
               ))}
             </div>

@@ -35,7 +35,7 @@ export function useStore<T extends object>(store: { get: () => T; subscribe: (l:
 
 export type ControlMode = 'auto' | 'touch' | 'keyboard';
 export type Quality = 'auto' | 'low' | 'medium' | 'high';
-export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'reload' | 'recover' | 'pause';
+export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'reload' | 'prevWeapon' | 'nextWeapon' | 'recover' | 'pause';
 
 export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   accelerate: ['KeyW', 'ArrowUp'],
@@ -45,7 +45,9 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   drift: ['Space'],
   nitro: ['ShiftLeft', 'ShiftRight'],
   fire: ['KeyF', 'KeyJ'],
-  reload: ['KeyR', 'KeyQ'],
+  reload: ['KeyR'],
+  prevWeapon: ['KeyQ'],
+  nextWeapon: ['KeyE'],
   recover: ['KeyR'],
   pause: ['Escape', 'KeyP'],
 };
@@ -85,6 +87,8 @@ export const settingsStore = createStore<Settings>('wobble.settings', DEFAULT_GA
       const b = (r.bindings as Record<string, unknown>)[k];
       if (Array.isArray(b) && b.every((x) => typeof x === 'string')) bindings[k] = b.slice(0, 3);
     }
+    // Q used to double as reload; it now picks the previous gun.
+    if (bindings.reload.join() === 'KeyR,KeyQ') bindings.reload = ['KeyR'];
   }
   return {
     controlMode: ['auto', 'touch', 'keyboard'].includes(r.controlMode as string) ? (r.controlMode as ControlMode) : 'auto',

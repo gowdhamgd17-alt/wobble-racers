@@ -68,7 +68,8 @@ describe('input wire format', () => {
     expect(decodeInput('hi')).toBeNull();
     expect(decodeInput([1, 2, 3])).toBeNull();
     expect(decodeInput([1, NaN, 0, 0, 0])).toBeNull();
-    expect(decodeInput([1, 0, 0, 0, 99])).toBeNull();
+    expect(decodeInput([1, 0, 0, 0, 999])).toBeNull();
+    expect(decodeInput([1, 0, 0, 0, 11 << 5])).toBeNull(); // weapon slot out of range
   });
 });
 
@@ -185,6 +186,24 @@ describe('vehicle controller', () => {
     expect(s.grounded).toBe(true);
     expect(s.overturnT).toBe(0);
     expect(Math.abs(s.roll)).toBeLessThan(0.2);
+  });
+  it('every class rolls back onto its wheels in one hop (no repeated flipping)', () => {
+    const t = getTrack({ layout: 'loop', trackId: 'valley', distanceKm: 1.5 });
+    for (const id of CAR_CLASS_IDS) {
+      const cfg = getVehicle(id);
+      const g = t.grid[1];
+      const s = createVehicleState(g.x, g.z, g.yaw);
+      s.grounded = false; s.y = 2; s.roll = Math.PI; s.vy = 0;
+      let flips = 0, wasOver = false;
+      for (let i = 0; i < 150; i++) {
+        stepVehicle(s, NEUTRAL_INPUT, cfg, t, { nitro: true, drift: true }, SIM_DT);
+        if (s.overturnT > 0 && !wasOver) flips++;
+        wasOver = s.overturnT > 0;
+      }
+      expect(flips, id).toBe(1);
+      expect(s.grounded, id).toBe(true);
+      expect(Math.abs(s.roll), id).toBeLessThan(0.01);
+    }
   });
 });
 

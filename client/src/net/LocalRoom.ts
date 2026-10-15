@@ -59,7 +59,7 @@ export class LocalRoom {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, yaw: 0, yawRate: 0, pitch: 0, roll: 0, pitchRate: 0, rollRate: 0,
       grounded: true, overturnT: 0, rampVy: 0, padCooldown: 0, boosting: false, drifting: false,
       health: MAX_HEALTH, maxHealth: MAX_HEALTH, nitro: NITRO.start, fireCd: 0, protectT: 0, respawnT: 0,
-      curWeapon: getWeapon(a.weapon).id, ammo: 0, reloadT: 0, kills: 0, deaths: 0,
+      curWeapon: getWeapon(a.weapon).id, ammo: 0, reloadT: 0, kills: 0, deaths: 0, powerT: 0,
       laps: 0, nextCp: 1, progress: 0, rank: order + 1, finishPlace: 0, ackSeq: 0, joinOrder: order,
     };
     this.state.players.set(id, p);

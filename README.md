@@ -41,8 +41,8 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
   - *Race*: loop circuits or straight sprints, with guns, crates and repair kits on the road.
   - *Battleground*: everyone spawns in Battle Town, a walled grid of streets with houses, big buildings, parks, trees, rocks and giant boulders, and fights it out. Most kills wins; pick a kill target (5 to 30) and an optional time limit (3, 5 or 10 minutes). Destroyed cars come back as a fresh car at a quiet spawn point.
 - **10 vehicle classes**, each with its own handling, armour and health pool (280 to 650 HP) and a matching collision footprint: Speedster, Bruiser, Drifter, Muscle, Buggy, Formula, Monster, Jeep, Pickup and a six-wheel Armored Truck.
-- **10 weapons**, chosen in the Garage and mounted on your roof: Pistol, SMG, M4 Rifle, Shotgun, Minigun, Sniper, Rocket Launcher, Grenade Launcher, Flamethrower and Homing Missiles. Each has its own damage, fire rate, magazine and reload; bullets are instant with tracers, rockets/grenades/missiles fly and explode with splash damage.
-- **Pickups**: green repair kits restore half your health, wooden crates hand you a heavy weapon for three magazines. Both come back a few seconds after they're taken.
+- **10 weapons on every vehicle**: switch guns any time during play (each gun keeps its own magazine; switching takes 0.4 s). The Garage sets the gun you start with. The guns: Pistol, SMG, M4 Rifle, Shotgun, Minigun, Sniper, Rocket Launcher, Grenade Launcher, Flamethrower and Homing Missiles. Each has its own damage, fire rate, magazine and reload; bullets are instant with tracers, rockets/grenades/missiles fly and explode with splash damage.
+- **Pickups**: green repair kits restore half your health; wooden power crates reload every gun instantly and give ×1.5 damage for 12 s. Both come back a few seconds after they're taken.
 - **"SAAVU!"**: destroy a car and a big SAAVU! card pops up; everyone sees it in the kill feed, and the victim sees who got them.
 - **8 drivers**: Professor Bonk, Moolissa, Zip-9, Pepper Pomodoro, Rexford, Luna Vega, Grandpa Gus and Pip, each with their own gag animation.
 - **Detailed procedural models**: smooth extruded bodies with real wheel arches, lathed tyres with sidewalls, tinted glass, chrome, clear-coat paint and studio reflections. Graphics quality Low/Medium lowers the polygon count for phones.
@@ -63,7 +63,8 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 | Handbrake / drift | Space | DRIFT |
 | Nitro | Shift | NITRO |
 | Fire weapon | F (or J) | FIRE |
-| Reload | R (or Q) | RELOAD |
+| Reload | R | RELOAD |
+| Switch gun | 1–9, 0 pick a gun · Q / E previous / next · or click the gun bar | GUN ▸ (or tap the gun bar) |
 | Recover stuck car | R (only acts when stuck or flipped) | ⟲ |
 | Pause | Esc / P | ❚❚ |
 

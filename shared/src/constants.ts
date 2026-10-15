@@ -73,7 +73,8 @@ export const PICKUP = {
   repairFraction: 0.5, // share of max health restored
   repairRespawn: 8,
   crateRespawn: 12,
-  crateMagazines: 3,
+  powerSeconds: 12, // power crate: damage boost duration
+  powerDamage: 1.5,
   raceSpacing: 170, // metres between pickup clusters on race tracks
 } as const;
 
