@@ -202,9 +202,10 @@ describe('game simulation', () => {
     run(sim, 3.2);
     const [me, a, b] = racers;
     a.bot = null; b.bot = null;
-    a.veh.x = me.veh.x + Math.sin(me.veh.yaw) * 25; a.veh.z = me.veh.z + Math.cos(me.veh.yaw) * 25; a.veh.yaw = me.veh.yaw;
-    b.veh.x = a.veh.x + 3; b.veh.z = a.veh.z; b.veh.yaw = me.veh.yaw;
-    a.veh.vx = a.veh.vz = b.veh.vx = b.veh.vz = 0;
+    // line up on an empty street: me facing +z, the two targets 25 m ahead
+    for (const [r, x, z] of [[me, -60, -150], [a, -60, -125], [b, -57, -125]] as const) {
+      Object.assign(r.veh, { x, z, yaw: 0, vx: 0, vz: 0, vy: 0, yawRate: 0, grounded: true, y: 0 });
+    }
     const meHp = me.p.health, aHp = a.p.health, bHp = b.p.health;
     me.queue.push({ seq: 1, input: { ...NEUTRAL_INPUT, fire: true } });
     let blast = false;

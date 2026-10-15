@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
-import { Phase, RacerStatus } from '@wobble/shared';
+import { Phase, RacerStatus, WEAPONS } from '@wobble/shared';
 import { Game, ordinal, webglAvailable, type HudData } from '../../game/Game';
 import { haptic, input } from '../../input/Input';
 import { net, useNet } from '../../net/Net';
@@ -92,11 +92,22 @@ export function Race({ onLeave }: { onLeave: () => void }) {
 
   const h = hud;
   const finished = h?.status === RacerStatus.FINISHED;
+  const battle = !!h?.battle;
+  const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+  const hpPct = h ? Math.max(0, Math.min(100, (h.health / Math.max(1, h.maxHealth)) * 100)) : 100;
   return (
     <div className={`race-root ${touchUI ? 'touch-mode' : ''}`} ref={hostRef} onContextMenu={(e) => e.preventDefault()}>
       <div className="hud" style={{ ['--touch-scale' as string]: settings.touchScale }}>
         {h && h.hitFlash > 0 && <div className="hit-flash" style={{ opacity: h.hitFlash }} />}
         <div className="hud-tl">
+          {battle ? (
+            <div className="hud-panel">
+              <div className="pos-big">{h?.kills ?? 0}<small>/{h?.killTarget} kills</small></div>
+              <div className="lap-text">
+                #{h?.rank || '-'} of {h?.total ?? '-'}{h?.timeLimited ? ` · ${mmss(h.timeLeft)}` : ''}
+              </div>
+            </div>
+          ) : (
           <div className="hud-panel">
             <div className="pos-big">{h?.rank || '-'}<small>/{h?.total ?? '-'}</small></div>
             <div className="lap-text">
@@ -106,13 +117,14 @@ export function Race({ onLeave }: { onLeave: () => void }) {
               <div className="meter" style={{ marginTop: 4 }}><span>🏁</span><div className="track"><div className="fill nitro" style={{ width: `${Math.min(100, ((h.coveredKm ?? 0) / Math.max(0.1, h.raceKm)) * 100)}%` }} /></div></div>
             )}
           </div>
+          )}
           <div className="hud-panel leader">
             {h?.leaderboard.slice(0, 6).map((r) => (
               <div key={r.id} className={`lrow ${r.me ? 'me' : ''} ${r.status === RacerStatus.LEFT ? 'gone' : ''}`}>
                 <span style={{ width: 18, textAlign: 'right' }}>{r.rank}</span>
                 <span className="dot" style={{ background: r.color, width: 10, height: 10 }} />
                 <span className="lname">{r.name}</span>
-                {r.status === RacerStatus.FINISHED && <span>🏁</span>}
+                {battle ? <span className="kd">{r.kills}</span> : r.status === RacerStatus.FINISHED && <span>🏁</span>}
               </div>
             ))}
           </div>
@@ -125,19 +137,52 @@ export function Race({ onLeave }: { onLeave: () => void }) {
           </div>
         </div>
         <div className="hud-bl hud-panel">
-          <div className="meter"><span>HP</span><div className="track"><div className={`fill hp-${h?.damage ?? 'healthy'}`} style={{ width: `${h?.health ?? 100}%` }} /></div></div>
+          <div className="meter"><span>HP</span><div className="track"><div className={`fill hp-${h?.damage ?? 'healthy'}`} style={{ width: `${hpPct}%` }} /></div></div>
           {h?.nitroOn !== false && <div className="meter"><span>N₂O</span><div className="track"><div className={`fill nitro ${h?.boosting ? 'on' : ''}`} style={{ width: `${h?.nitro ?? 0}%` }} /></div></div>}
-          {h?.weaponsOn !== false && <div className="meter"><span>Gun</span><div className="track"><div className="fill weapon" style={{ width: `${(h?.fireReady ?? 1) * 100}%` }} /></div></div>}
+          {h?.weaponsOn !== false && h && (
+            <div className={`weapon-row ${h.ownWeapon ? '' : 'crate'}`}>
+              <span className="wname">{h.weaponName}</span>
+              {h.reloading > 0 ? (
+                <span className="ammo reloading">
+                  <span className="rbar"><span style={{ width: `${h.reloading * 100}%` }} /></span>RELOAD
+                </span>
+              ) : (
+                <span className={`ammo ${h.ammo <= Math.ceil(h.magazine * 0.2) ? 'low' : ''}`}>{h.ammo}<small>/{h.magazine}</small></span>
+              )}
+            </div>
+          )}
         </div>
+        {h && h.killFeed.length > 0 && (
+          <div className="killfeed">
+            {h.killFeed.map((k) => (
+              <div key={k.id} className={`kf ${k.meKiller ? 'mine' : ''} ${k.meVictim ? 'dead' : ''}`}>
+                {k.killer ? <b style={{ color: k.killerColor }}>{k.killer}</b> : null}
+                <span className="kw">{weaponLabel(k.weapon)}</span>
+                <b style={{ color: k.victimColor }}>{k.victim}</b>
+              </div>
+            ))}
+          </div>
+        )}
+        {h?.saavu && (
+          <div className="saavu" key={h.saavu.key}>
+            <div className="saavu-title">{h.saavu.title}</div>
+            <div className="saavu-sub">{h.saavu.sub}</div>
+          </div>
+        )}
         <div className="hud-br">
           <div className="speed">{h?.speedKmh ?? 0}<small> km/h</small></div>
         </div>
 
         {h?.phase === Phase.COUNTDOWN && <div className="center-banner" key={Math.ceil(h.countdown)}>{Math.ceil(h.countdown) || 'GO!'}</div>}
         {h?.banner && <div className="center-banner" key={h.banner}>{h.banner}</div>}
-        {h?.status === RacerStatus.DESTROYED && <div className="center-banner sub">Respawning in {h.respawnT.toFixed(1)}s…</div>}
+        {h?.status === RacerStatus.DESTROYED && (
+          <div className="center-banner sub">
+            {h.killedBy ? <div className="killed-by">Destroyed by {h.killedBy}</div> : <div className="killed-by">Wrecked!</div>}
+            New car in {h.respawnT.toFixed(1)}s…
+          </div>
+        )}
         {h?.wrongWay && <div className="wrong-way">WRONG WAY</div>}
-        {finished && !h?.banner && (
+        {finished && !h?.banner && !battle && (
           <div className="center-banner sub interactive" style={{ pointerEvents: 'auto' }}>
             <div>You finished {ordinal(h!.finishPlace)}! {h?.spectating ? `Watching ${h.spectating}` : 'Waiting for the others…'}</div>
             <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
@@ -195,6 +240,12 @@ export function Race({ onLeave }: { onLeave: () => void }) {
   );
 }
 
+function weaponLabel(id: string) {
+  const names: Record<string, string> = { ram: 'rammed', wall: 'crashed', fall: 'fell', test: 'zapped' };
+  if (names[id]) return names[id];
+  return WEAPONS.find((w) => w.id === id)?.label ?? id;
+}
+
 const ICONS: Record<string, JSX.Element> = {
   left: <svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
   right: <svg viewBox="0 0 24 24"><path d="m9 4 8 8-8 8" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
@@ -205,7 +256,7 @@ function TouchControls({ disabledFire, disabledNitro }: { disabledFire: boolean;
   const steerPad = useRef<HTMLDivElement>(null);
   const refresh = () => {
     const s = new Set<Action>();
-    for (const a of ['left', 'right', 'accelerate', 'brake', 'drift', 'nitro', 'fire', 'recover'] as Action[]) if (input.isDown(a)) s.add(a);
+    for (const a of ['left', 'right', 'accelerate', 'brake', 'drift', 'nitro', 'fire', 'reload', 'recover'] as Action[]) if (input.isDown(a)) s.add(a);
     setDown(s);
   };
   useEffect(() => () => input.resetAll(), []);
@@ -264,7 +315,7 @@ function TouchControls({ disabledFire, disabledNitro }: { disabledFire: boolean;
         {btn('drift', 'DRIFT', 'small')}
         {btn('brake', 'BRAKE')}
       </div>
-      <div className="top-right-actions">{btn('recover', '⟲', 'small')}</div>
+      <div className="top-right-actions">{!disabledFire && btn('reload', 'RELOAD', 'small')}{btn('recover', '⟲', 'small')}</div>
     </div>
   );
 }

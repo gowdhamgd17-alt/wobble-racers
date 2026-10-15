@@ -37,7 +37,13 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 
 ## What's in the game
 
-- **7 car classes**, each with its own handling and a matching collision footprint: Speedster, Bruiser, Drifter, Muscle, Buggy (barely slows on grass), Formula (fastest, most fragile) and Monster (huge tyres, hardest hitter).
+- **Two game modes**
+  - *Race*: loop circuits or straight sprints, with guns, crates and repair kits on the road.
+  - *Battleground*: everyone spawns in Battle Town, a walled grid of streets with houses, big buildings, parks, trees, rocks and giant boulders, and fights it out. Most kills wins; pick a kill target (5 to 30) and an optional time limit (3, 5 or 10 minutes). Destroyed cars come back as a fresh car at a quiet spawn point.
+- **10 vehicle classes**, each with its own handling, armour and health pool (280 to 650 HP) and a matching collision footprint: Speedster, Bruiser, Drifter, Muscle, Buggy, Formula, Monster, Jeep, Pickup and a six-wheel Armored Truck.
+- **10 weapons**, chosen in the Garage and mounted on your roof: Pistol, SMG, M4 Rifle, Shotgun, Minigun, Sniper, Rocket Launcher, Grenade Launcher, Flamethrower and Homing Missiles. Each has its own damage, fire rate, magazine and reload; bullets are instant with tracers, rockets/grenades/missiles fly and explode with splash damage.
+- **Pickups**: green repair kits restore half your health, wooden crates hand you a heavy weapon for three magazines. Both come back a few seconds after they're taken.
+- **"SAAVU!"**: destroy a car and a big SAAVU! card pops up; everyone sees it in the kill feed, and the victim sees who got them.
 - **8 drivers**: Professor Bonk, Moolissa, Zip-9, Pepper Pomodoro, Rexford, Luna Vega, Grandpa Gus and Pip, each with their own gag animation.
 - **Detailed procedural models**: smooth extruded bodies with real wheel arches, lathed tyres with sidewalls, tinted glass, chrome, clear-coat paint and studio reflections. Graphics quality Low/Medium lowers the polygon count for phones.
 - **Two course types, any distance**
@@ -45,7 +51,7 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
   - *Straight sprint*: Canyon Run or Coast Road from a START gate to a FINISH gate, 1 to 10 km, with kilometre boards along the way.
   - Ramps and boost pads are placed automatically on the straightest stretches, so every length gets jumps.
 - **Real-size collisions**: cars collide as oriented boxes that match each body, so noses and tails can no longer slide into each other. Every corner of the car stays inside the barriers, sprints have end walls, blaster hits use the real body shape, and respawns keep a full car length clear. Spawn-protected cars are still solid; they just can't be damaged.
-- **Race vs bots offline**: works with no server, with 1 to 14 bots and all the same course options.
+- **Play vs bots offline**: race or Battleground with no server, 1 to 14 bots. Battle bots hunt the nearest enemy, steer around buildings and go for repair kits when hurt.
 
 ## Controls
 
@@ -56,8 +62,9 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 | Steer | A D / ← → | Left/right pads (slide your thumb between them) |
 | Handbrake / drift | Space | DRIFT |
 | Nitro | Shift | NITRO |
-| Fire blaster | F (or J) | FIRE |
-| Recover stuck car | R | ⟲ |
+| Fire weapon | F (or J) | FIRE |
+| Reload | R (or Q) | RELOAD |
+| Recover stuck car | R (only acts when stuck or flipped) | ⟲ |
 | Pause | Esc / P | ❚❚ |
 
 The control scheme is chosen automatically from the input you used last, so touch laptops can switch between keyboard and touch without a reload. Settings lets you force a mode, resize touch buttons, turn on auto-gas, adjust camera follow speed, graphics quality and separate SFX / music volumes. Phones play in landscape; in portrait a rotate prompt appears and your car coasts.
@@ -180,14 +187,17 @@ The brief suggests Rapier "where appropriate". We use a purpose-built determinis
 - Rooms hold up to 15 players; races start with 2+. The host can start when every other connected player is Ready. The server re-validates every start request.
 - If the host leaves, the earliest-joined connected player becomes host.
 - Disconnected players keep their slot for 20 s (their car stops and becomes a non-colliding ghost). After that they are listed as "Left the race".
-- No race time limit. The race ends when every remaining player has finished or left. Finished players become ghosts and can spectate others.
-- Destroyed cars respawn after 1.6 s at the destruction spot (or the nearest clear, on-road, non-ramp spot), with full health, 2 s of shield protection and the same lap progress.
+- Races have no time limit: a race ends when every remaining player has finished or left. Battles end at the kill target, when the time limit runs out, or when everyone has left; ties go to fewer deaths.
+- Kills are credited to whoever last damaged the victim within 8 s (shots, blasts or rams). Nobody takes damage from their own explosions, but they still get shoved.
+- In races, guns stay cold for the first 5 s after the green light.
+- All game rules live in one shared simulation (`shared/src/sim.ts`) used by both the server room and the offline bot mode, so they can never drift apart. Finished players become ghosts and can spectate others.
+- In races, destroyed cars respawn after 1.6 s at the destruction spot (or the nearest clear, on-road, non-ramp spot), with full health, 2 s of shield protection and the same lap progress.
 - Changing room settings un-readies guests so nobody is surprised by new rules.
-- "Friendly fire" is not exposed as a setting because there are no teams yet; all weapons hit all opponents when Blasters are on.
+- "Friendly fire" is not exposed as a setting because there are no teams yet; all weapons hit all opponents when weapons are on.
 
 ### Audio
 
-All sounds and music are synthesised at runtime with the Web Audio API, so there are no third-party assets to license. Audio starts after the first tap/keypress (browser autoplay rules). To use recorded samples, replace the bodies of the `play`-style methods in `client/src/audio/Audio.ts` with `AudioBufferSourceNode` playback.
+All sounds and music are synthesised at runtime with the Web Audio API, so there are no third-party assets to license. The engine models each vehicle's cylinder count and rev range with a gearbox that shifts up as you accelerate; every gun has its own layered shot (supersonic crack, muzzle boom, low thump, reverb) plus magazine-out / magazine-in / charging-handle reload clicks; impacts include bullet pings, ricochets, metal crunches and explosions whose rumble arrives later the further away they are. Audio starts after the first tap/keypress (browser autoplay rules). To use recorded samples, replace the bodies of the `play`-style methods in `client/src/audio/Audio.ts` with `AudioBufferSourceNode` playback.
 
 ---
 

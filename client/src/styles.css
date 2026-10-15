@@ -350,3 +350,33 @@ p { margin: 0; }
 .binding-row button { min-width: 120px; }
 
 .fps { position: absolute; left: 50%; bottom: calc(4px + var(--safe-bottom)); transform: translateX(-50%); font-size: 11px; opacity: 0.7; }
+
+/* ------------------------------------------------------------------ combat HUD */
+.leader .kd { margin-left: auto; font-family: var(--font-display); color: var(--sun); padding-left: 8px; }
+.weapon-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-family: var(--font-display); }
+.weapon-row .wname { font-size: calc(14px * var(--ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.weapon-row.crate .wname { color: var(--sun); }
+.weapon-row.crate .wname::before { content: '★ '; }
+.weapon-row .ammo { font-size: calc(24px * var(--ui)); line-height: 1; }
+.weapon-row .ammo small { font-size: 0.55em; opacity: 0.7; }
+.weapon-row .ammo.low { color: var(--tomato); animation: blink 0.6s steps(2) infinite; }
+.weapon-row .ammo.reloading { font-size: calc(12px * var(--ui)); color: var(--sun); display: flex; align-items: center; gap: 6px; }
+.weapon-row .rbar { width: calc(60px * var(--ui)); height: 8px; border-radius: 99px; background: rgba(255,255,255,0.2); overflow: hidden; display: inline-block; }
+.weapon-row .rbar span { display: block; height: 100%; background: var(--sun); }
+.killfeed { position: absolute; top: calc(10px + var(--safe-top)); right: calc(160px * var(--ui) + 70px + var(--safe-right)); display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-size: calc(13px * var(--ui)); max-width: 40vw; }
+.kf { background: rgba(29,31,63,0.72); color: var(--paper); border-radius: 10px; padding: 3px 10px; display: flex; gap: 6px; align-items: center; white-space: nowrap; animation: pop 0.2s ease-out; }
+.kf b { text-shadow: 0 1px 0 rgba(0,0,0,0.6); max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.kf .kw { opacity: 0.8; font-size: 0.85em; }
+.kf.mine { border: 2px solid var(--sun); }
+.kf.dead { border: 2px solid var(--tomato); }
+.saavu { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); text-align: center; animation: saavu-in 0.35s cubic-bezier(.2,1.6,.4,1); }
+.saavu-title { font-family: var(--font-display); font-size: clamp(56px, 13vw, 140px); color: #fff; letter-spacing: 0.04em; text-shadow: 0 6px 0 var(--tomato-dark), 0 12px 0 var(--ink), 0 0 40px rgba(255,90,78,0.8); transform: rotate(-4deg); }
+.saavu-sub { display: inline-block; margin-top: 8px; background: var(--tomato); color: var(--paper); border: 3px solid var(--ink); border-radius: 12px; padding: 4px 14px; font-family: var(--font-display); font-size: clamp(16px, 2.6vw, 24px); }
+@keyframes saavu-in { from { transform: translateX(-50%) scale(2.2); opacity: 0; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
+.killed-by { color: var(--tomato); font-size: 1.3em; margin-bottom: 4px; }
+.touch-mode .killfeed { top: calc(10px + 140px * var(--ui) + var(--safe-top)); right: calc(10px + var(--safe-right)); }
+@media (max-height: 500px) {
+  .killfeed { top: calc(10px + 140px * var(--ui) + var(--safe-top)); right: calc(10px + var(--safe-right)); font-size: 11px; gap: 2px; }
+  .kf { padding: 2px 8px; }
+  .kf:nth-last-child(n + 4) { display: none; }
+}

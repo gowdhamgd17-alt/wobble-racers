@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Btn } from '../components/common';
 import { SERVER_MISSING_MSG, checkServer } from '../../net/Net';
 
-export type HomeAction = 'practice' | 'play' | 'quick' | 'create' | 'browse' | 'garage' | 'character' | 'settings';
+export type HomeAction = 'practice' | 'battle' | 'play' | 'quick' | 'create' | 'browse' | 'garage' | 'character' | 'settings';
 
 export function Home({ name, onAction, busy }: { name: string; onAction: (a: HomeAction) => void; busy: boolean }) {
   const title = 'WOBBLE RACERS';
@@ -23,7 +23,7 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
               <div key={wi}>{[...w].map((ch, i) => <span key={i}>{ch}</span>)}</div>
             ))}
           </h1>
-          <p className="tagline">Race, drift, boost and bonk your friends off the road. 2 to 15 players.</p>
+          <p className="tagline">Race, drift, boost and blast your friends off the road, or fight it out in the Battleground. 2 to 15 players.</p>
         </div>
         {serverOk === false && (
           <div className="card server-banner" role="alert">
@@ -42,6 +42,7 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
             </Btn>
           )}
           {serverOk !== false && <Btn variant="ghost wide" disabled={busy} onClick={() => onAction('practice')}>Practice vs bots (offline)</Btn>}
+          <Btn variant="danger wide" disabled={busy} onClick={() => onAction('battle')}>💥 Battleground vs bots</Btn>
           <Btn variant="go" disabled={busy} onClick={() => onAction('quick')}>Quick Play</Btn>
           <Btn variant="sky" disabled={busy} onClick={() => onAction('create')}>Create Room</Btn>
           <Btn disabled={busy} onClick={() => onAction('browse')}>Join Room</Btn>
@@ -50,7 +51,7 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
           <Btn variant="ghost" onClick={() => onAction('settings')}>Settings</Btn>
         </div>
         <p className="muted small" style={{ textAlign: 'center' }}>
-          Desktop: <span className="kbd">W A S D</span> drive · <span className="kbd">Space</span> drift · <span className="kbd">Shift</span> nitro · <span className="kbd">F</span> fire. Phones & tablets get touch controls.
+          Desktop: <span className="kbd">W A S D</span> drive · <span className="kbd">Space</span> drift · <span className="kbd">Shift</span> nitro · <span className="kbd">F</span> fire · <span className="kbd">R</span> reload. Phones & tablets get touch controls.
         </p>
       </div>
     </div>

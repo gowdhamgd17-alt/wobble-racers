@@ -106,7 +106,7 @@ export function StatBars({ id }: { id: string }) {
   if (!v) return null;
   const rows: [string, number][] = [['Speed', v.stats.speed], ['Accel', v.stats.accel], ['Handling', v.stats.handling], ['Armor', v.stats.armor], ['Power', v.stats.power]];
   return (
-    <div className="stack" style={{ gap: 3 }}>
+    <div className="stack" style={{ gap: 3, width: '100%' }}>
       {rows.map(([k, n]) => (
         <div className="statbar" key={k}><span>{k}</span><span className="bar"><i style={{ width: `${n * 100}%` }} /></span></div>
       ))}

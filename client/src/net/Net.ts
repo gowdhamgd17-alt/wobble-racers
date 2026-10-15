@@ -56,7 +56,7 @@ export interface RoomListing {
   clients: number;
   maxClients: number;
   locked: boolean;
-  metadata: { name?: string; phase?: string; track?: string; laps?: number; players?: number; maxPlayers?: number };
+  metadata: { name?: string; phase?: string; track?: string; mode?: string; laps?: number; players?: number; maxPlayers?: number };
 }
 
 export type ConnStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';

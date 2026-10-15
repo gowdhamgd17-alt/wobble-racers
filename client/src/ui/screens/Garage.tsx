@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { BODY_COLORS, CAR_CLASS_IDS, CHARACTERS, VEHICLES, WHEEL_STYLES, characterInfo, type Appearance } from '@wobble/shared';
+import { BODY_COLORS, CAR_CLASS_IDS, CHARACTERS, VEHICLES, WEAPONS, WHEEL_STYLES, characterInfo, getWeapon, type Appearance } from '@wobble/shared';
 import { profileStore, useStore } from '../../state/store';
 import { Btn, PreviewBox, StatBars } from '../components/common';
 import { audio } from '../../audio/Audio';
 
-type Tab = 'car' | 'paint' | 'driver';
+type Tab = 'car' | 'weapon' | 'paint' | 'driver';
 
 export function Garage({ onDone, initialTab = 'car', confirmLabel = 'Confirm' }: { onDone: (a: Appearance) => void; initialTab?: Tab; confirmLabel?: string }) {
   const profile = useStore(profileStore);
@@ -30,14 +30,14 @@ export function Garage({ onDone, initialTab = 'car', confirmLabel = 'Confirm' }:
         </div>
         <div className="split">
           <div className="stack">
-            <PreviewBox appearance={app} focus={tab === 'driver' ? 'driver' : 'car'} label={tab === 'driver' ? characterInfo(app.character).name : `${VEHICLES[app.carClass as 'drifter'].label} · ${characterInfo(app.character).name}`} />
-            <p className="small muted">Drag to spin. Colors and wheels are cosmetic only; car class changes handling.</p>
+            <PreviewBox appearance={app} focus={tab === 'driver' ? 'driver' : 'car'} label={tab === 'driver' ? characterInfo(app.character).name : tab === 'weapon' ? `${VEHICLES[app.carClass as 'drifter'].label} · ${getWeapon(app.weapon).label}` : `${VEHICLES[app.carClass as 'drifter'].label} · ${characterInfo(app.character).name}`} />
+            <p className="small muted">Drag to spin. Colors and wheels are cosmetic; the car class changes handling and armour, and your weapon is what you start every life with.</p>
           </div>
           <div className="card stack">
             <div className="tabs" role="tablist">
-              {(['car', 'paint', 'driver'] as Tab[]).map((t) => (
+              {(['car', 'weapon', 'paint', 'driver'] as Tab[]).map((t) => (
                 <button key={t} role="tab" aria-selected={tab === t} onClick={() => { audio.click(); setTab(t); }}>
-                  {t === 'car' ? 'Car' : t === 'paint' ? 'Paint & wheels' : 'Driver'}
+                  {t === 'car' ? 'Car' : t === 'weapon' ? 'Weapon' : t === 'paint' ? 'Paint' : 'Driver'}
                 </button>
               ))}
             </div>
@@ -45,9 +45,25 @@ export function Garage({ onDone, initialTab = 'car', confirmLabel = 'Confirm' }:
               <div className="pick-grid">
                 {CAR_CLASS_IDS.map((id) => (
                   <button key={id} className="pick" aria-pressed={app.carClass === id} onClick={() => set({ carClass: id })}>
-                    <strong>{VEHICLES[id].label}</strong>
+                    <strong>{VEHICLES[id].label} <span className="small muted">· {VEHICLES[id].maxHealth} HP</span></strong>
                     <span className="small">{VEHICLES[id].blurb}</span>
                     <StatBars id={id} />
+                  </button>
+                ))}
+              </div>
+            )}
+            {tab === 'weapon' && (
+              <div className="pick-grid">
+                {WEAPONS.map((w) => (
+                  <button key={w.id} className="pick" aria-pressed={app.weapon === w.id} onClick={() => { set({ weapon: w.id }); audio.reloaded(w.id); }}>
+                    <strong>{w.label}</strong>
+                    <span className="small">{w.blurb}</span>
+                    <span className="small muted">{w.pellets > 1 ? `${w.pellets} × ${w.damage}` : w.damage} dmg{w.splash ? ` + ${w.splash} blast` : ''} · {w.magazine} rounds · {w.reload}s reload</span>
+                    <div className="stack" style={{ gap: 3, width: '100%' }}>
+                      {(['damage', 'rate', 'range'] as const).map((k) => (
+                        <div className="statbar" key={k}><span>{k === 'rate' ? 'Fire rate' : k[0].toUpperCase() + k.slice(1)}</span><span className="bar"><i style={{ width: `${w.stats[k] * 100}%` }} /></span></div>
+                      ))}
+                    </div>
                   </button>
                 ))}
               </div>

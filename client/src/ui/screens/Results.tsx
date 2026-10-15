@@ -13,6 +13,7 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
   });
   const me = snap.players.find((p) => p.id === myId);
   const winner = rows[0];
+  const battle = snap.settings.mode === 'battle';
   return (
     <div className="menu-bg">
       <div className="screen" style={{ maxWidth: 820 }}>
@@ -20,12 +21,14 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
           <h1 className="logo" style={{ fontSize: 'clamp(40px, 9vw, 80px)' }}>
             {me?.finishPlace === 1 ? 'YOU WIN!' : 'RESULTS'}
           </h1>
-          {winner && winner.finishPlace === 1 && <p className="tagline">{winner.name} takes the trophy in {characterInfo(winner.character).name}'s {VEHICLES[winner.carClass as 'drifter']?.label}!</p>}
+          {winner && winner.finishPlace === 1 && (battle
+            ? <p className="tagline">{winner.name} rules the Battleground with {winner.kills} {winner.kills === 1 ? 'kill' : 'kills'}. SAAVU!</p>
+            : <p className="tagline">{winner.name} takes the trophy in {characterInfo(winner.character).name}'s {VEHICLES[winner.carClass as 'drifter']?.label}!</p>)}
         </div>
         <div className="podium">
           {rows.map((p) => {
             const place = p.finishPlace ? ordinal(p.finishPlace) : '-';
-            const status = p.finishPlace ? 'Finished' : p.status === RacerStatus.LEFT ? 'Left the race' : !p.connected ? 'Disconnected' : 'Did not finish';
+            const status = battle ? (p.status === RacerStatus.LEFT ? 'Left the battle' : `${p.kills} kills`) : p.finishPlace ? 'Finished' : p.status === RacerStatus.LEFT ? 'Left the race' : !p.connected ? 'Disconnected' : 'Did not finish';
             return (
               <div key={p.id} className={`result-row ${p.id === myId ? 'me' : ''} ${p.finishPlace === 1 ? 'p1' : ''}`}>
                 <div className="place">{place}</div>
@@ -37,7 +40,7 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
                 <div style={{ textAlign: 'right' }}>
                   <div className="small">{status}</div>
                   <div className="small muted">
-                    {snap.settings.layout === 'straight' ? `${snap.settings.distanceKm} km sprint` : `${p.laps}/${snap.settings.laps} laps`}
+                    {battle ? `${p.deaths} ${p.deaths === 1 ? 'death' : 'deaths'}` : snap.settings.layout === 'straight' ? `${snap.settings.distanceKm} km sprint` : `${p.laps}/${snap.settings.laps} laps`}
                   </div>
                 </div>
               </div>
@@ -47,7 +50,7 @@ export function Results({ snap, myId, onRematch, onLobby, onLeave }: { snap: Roo
         <div className="lobby-actions">
           {!net.offline && <Btn variant="ghost" onClick={onLeave}>Leave room</Btn>}
           <Btn onClick={onLobby}>{net.offline ? 'Main menu' : 'Return to lobby'}</Btn>
-          <Btn variant="go" onClick={onRematch}>{net.offline ? 'Race again' : 'Rematch (ready up)'}</Btn>
+          <Btn variant="go" onClick={onRematch}>{net.offline ? (battle ? 'Fight again' : 'Race again') : 'Rematch (ready up)'}</Btn>
         </div>
       </div>
     </div>

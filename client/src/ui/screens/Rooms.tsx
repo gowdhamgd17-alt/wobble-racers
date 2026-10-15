@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { DEFAULT_SETTINGS, KM_OPTIONS, LAP_OPTIONS, MAX_PLAYERS, Phase, ROOM_NAME_MAX_LENGTH, TRACK_DEFS, sanitizeSettings, tracksFor, type Layout, type RaceSettings } from '@wobble/shared';
+import { ARENA_DEFS, DEFAULT_SETTINGS, KILL_TARGETS, KM_OPTIONS, LAP_OPTIONS, TIME_LIMITS, MAX_PLAYERS, Phase, ROOM_NAME_MAX_LENGTH, TRACK_DEFS, sanitizeSettings, tracksFor, type Layout, type RaceSettings } from '@wobble/shared';
 import { net, type RoomListing } from '../../net/Net';
 import { Btn, Segmented, Toggle } from '../components/common';
 
@@ -62,7 +62,7 @@ export function RoomBrowser({ onBack, onJoin, onCreate, busy }: { onBack: () => 
                 <div key={r.code} className="room-item">
                   <div>
                     <div className="title">{r.metadata.name ?? r.code}</div>
-                    <div className="small muted">{r.metadata.track} · {r.metadata.laps} laps · code {r.code}</div>
+                    <div className="small muted">{r.metadata.track}{r.metadata.mode === 'battle' ? '' : ` · ${r.metadata.laps} laps`} · code {r.code}</div>
                   </div>
                   <div className="phase small">{PHASE_LABEL[phase] ?? phase}</div>
                   <Btn variant={joinable ? 'go' : ''} disabled={!joinable || busy} onClick={() => onJoin(r.code)}>
@@ -115,8 +115,53 @@ export function SettingsFields({ s, onChange, disabled }: { s: RaceSettings; onC
   const options = tracksFor(layout);
   const def = TRACK_DEFS.find((t) => t.id === s.trackId);
   const total = layout === 'loop' ? s.distanceKm * s.laps : s.distanceKm;
+  const battle = s.mode === 'battle';
+  const modeField = (
+    <div className="field">
+      <label>Game mode</label>
+      <Segmented<string>
+        options={['race', 'battle']}
+        value={battle ? 'battle' : 'race'}
+        disabled={disabled}
+        onChange={(v) => onChange({ mode: v, ...(v === 'battle' ? { weapons: true, damage: true } : {}) })}
+        render={(v) => (v === 'race' ? '🏁 Race' : '💥 Battleground')}
+      />
+    </div>
+  );
+  const toggles = (
+    <div>
+      <Toggle label="Car collisions" checked={s.collisions} disabled={disabled} onChange={(v) => onChange({ collisions: v })} />
+      <Toggle label="Car damage & destruction" checked={s.damage} disabled={disabled} onChange={(v) => onChange({ damage: v })} />
+      <Toggle label="Weapons, crates & repair kits" checked={s.weapons} disabled={disabled} onChange={(v) => onChange({ weapons: v })} />
+      <Toggle label="Nitro & boost pads" checked={s.nitro} disabled={disabled} onChange={(v) => onChange({ nitro: v })} />
+      <Toggle label={<>Drifting <span className="small muted">(off: handbrake just brakes)</span></>} checked={s.drift} disabled={disabled} onChange={(v) => onChange({ drift: v })} />
+    </div>
+  );
+  if (battle) {
+    const arena = ARENA_DEFS.find((a) => a.id === s.arenaId) ?? ARENA_DEFS[0];
+    return (
+      <div className="stack">
+        {modeField}
+        <div className="field">
+          <label>Map</label>
+          <Segmented options={ARENA_DEFS.map((a) => a.id)} value={arena.id} disabled={disabled} onChange={(v) => onChange({ arenaId: v })} render={(v) => ARENA_DEFS.find((a) => a.id === v)!.name} />
+          <span className="small muted">{arena.description} Everyone fights in the same town; repair kits and weapon crates keep coming back.</span>
+        </div>
+        <div className="field">
+          <label>Kills to win</label>
+          <Segmented options={KILL_TARGETS} value={s.killTarget as (typeof KILL_TARGETS)[number]} disabled={disabled} onChange={(v) => onChange({ killTarget: v })} />
+        </div>
+        <div className="field">
+          <label>Time limit</label>
+          <Segmented options={TIME_LIMITS} value={s.timeLimit as (typeof TIME_LIMITS)[number]} disabled={disabled} onChange={(v) => onChange({ timeLimit: v })} render={(v) => (v ? `${v} min` : 'None')} />
+        </div>
+        {toggles}
+      </div>
+    );
+  }
   return (
     <div className="stack">
+      {modeField}
       <div className="field">
         <label>Course type</label>
         <Segmented<Layout>
@@ -146,13 +191,7 @@ export function SettingsFields({ s, onChange, disabled }: { s: RaceSettings; onC
         Race distance: <strong>{total % 1 ? total.toFixed(1) : total} km</strong>
         {layout === 'loop' ? ` (${s.laps} × ${s.distanceKm} km)` : ' from start gate to finish gate'}
       </p>
-      <div>
-        <Toggle label="Car collisions" checked={s.collisions} disabled={disabled} onChange={(v) => onChange({ collisions: v })} />
-        <Toggle label="Car damage & destruction" checked={s.damage} disabled={disabled} onChange={(v) => onChange({ damage: v })} />
-        <Toggle label="Blasters" checked={s.weapons} disabled={disabled} onChange={(v) => onChange({ weapons: v })} />
-        <Toggle label="Nitro & boost pads" checked={s.nitro} disabled={disabled} onChange={(v) => onChange({ nitro: v })} />
-        <Toggle label={<>Drifting <span className="small muted">(off: handbrake just brakes)</span></>} checked={s.drift} disabled={disabled} onChange={(v) => onChange({ drift: v })} />
-      </div>
+      {toggles}
     </div>
   );
 }
@@ -160,14 +199,15 @@ export function SettingsFields({ s, onChange, disabled }: { s: RaceSettings; onC
 const PRACTICE_KEY = 'wobble.practice';
 export interface PracticeOpts { settings: RaceSettings; bots: number }
 
-export function PracticeSetup({ onBack, onStart, busy }: { onBack: () => void; onStart: (o: PracticeOpts) => void; busy: boolean }) {
+export function PracticeSetup({ onBack, onStart, busy, mode = 'race' }: { onBack: () => void; onStart: (o: PracticeOpts) => void; busy: boolean; mode?: string }) {
   const [opts, setOpts] = useState<PracticeOpts>(() => {
     try {
       const raw = JSON.parse(localStorage.getItem(PRACTICE_KEY) ?? 'null');
-      if (raw) return { settings: sanitizeSettings(raw.settings, { ...DEFAULT_SETTINGS, laps: 2 }), bots: Math.max(1, Math.min(14, Number(raw.bots) || 7)) };
+      if (raw) return { settings: sanitizeSettings({ ...raw.settings, mode }, { ...DEFAULT_SETTINGS, laps: 2 }), bots: Math.max(1, Math.min(14, Number(raw.bots) || 7)) };
     } catch { /* ignore */ }
-    return { settings: { ...DEFAULT_SETTINGS, laps: 2 }, bots: 7 };
+    return { settings: { ...DEFAULT_SETTINGS, laps: 2, mode }, bots: 7 };
   });
+  const battle = opts.settings.mode === 'battle';
   const start = () => {
     try { localStorage.setItem(PRACTICE_KEY, JSON.stringify(opts)); } catch { /* ignore */ }
     onStart(opts);
@@ -177,7 +217,7 @@ export function PracticeSetup({ onBack, onStart, busy }: { onBack: () => void; o
       <div className="screen" style={{ maxWidth: 720 }}>
         <div className="topbar">
           <Btn variant="ghost icon" aria-label="Back" onClick={onBack}>←</Btn>
-          <h2>Race vs bots</h2>
+          <h2>{battle ? 'Battleground vs bots' : 'Race vs bots'}</h2>
         </div>
         <form className="card stack" onSubmit={(e) => { e.preventDefault(); start(); }}>
           <div className="field">
@@ -185,7 +225,7 @@ export function PracticeSetup({ onBack, onStart, busy }: { onBack: () => void; o
             <input className="range" type="range" min={1} max={14} value={opts.bots} onChange={(e) => setOpts({ ...opts, bots: Number(e.target.value) })} />
           </div>
           <SettingsFields s={opts.settings} onChange={(p) => setOpts({ ...opts, settings: sanitizeSettings(p, opts.settings) })} />
-          <Btn type="submit" variant="primary big" disabled={busy}>Start race</Btn>
+          <Btn type="submit" variant="primary big" disabled={busy}>{battle ? 'Start battle' : 'Start race'}</Btn>
         </form>
       </div>
     </div>

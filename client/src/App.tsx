@@ -14,7 +14,7 @@ import { Results } from './ui/screens/Results';
 import { SettingsPanel } from './ui/screens/SettingsPanel';
 
 type MenuScreen = 'home' | 'name' | 'browse' | 'create' | 'garage' | 'practice';
-type Pending = 'quick' | 'create' | 'browse' | 'practice' | null;
+type Pending = 'quick' | 'create' | 'browse' | 'practice' | 'battle' | null;
 
 function AppInner() {
   const toast = useToast();
@@ -28,6 +28,7 @@ function AppInner() {
   const [results, setResults] = useState<RoomSnap | null>(null);
   const resultsRace = useRef(-1);
   const [busy, setBusy] = useState(false);
+  const [practiceMode, setPracticeMode] = useState<'race' | 'battle'>('race');
 
   // Resume a session after a page reload (within the reconnection window).
   useEffect(() => { void net.tryResume(); }, []);
@@ -54,7 +55,7 @@ function AppInner() {
 
   const doPending = (p: Pending, name: string) => {
     if (p === 'quick') void run(() => net.quickPlay(name, profileStore.get().appearance));
-    else if (p === 'practice') setScreen('practice');
+    else if (p === 'practice' || p === 'battle') { setPracticeMode(p === 'battle' ? 'battle' : 'race'); setScreen('practice'); }
     else if (p === 'create') setScreen('create');
     else if (p === 'browse') setScreen('browse');
     else setScreen('home');
@@ -66,7 +67,7 @@ function AppInner() {
       setGarageTab(a === 'character' ? 'driver' : 'car');
       return setScreen('garage');
     }
-    const p: Pending = a === 'practice' ? 'practice' : a === 'play' || a === 'quick' ? 'quick' : a === 'create' ? 'create' : 'browse';
+    const p: Pending = a === 'practice' ? 'practice' : a === 'battle' ? 'battle' : a === 'play' || a === 'quick' ? 'quick' : a === 'create' ? 'create' : 'browse';
     if (!profile.name) { setPending(p); setScreen('name'); return; }
     doPending(p, profile.name);
   };
@@ -101,7 +102,7 @@ function AppInner() {
   } else if (screen === 'name') {
     content = (
       <NameEntry
-        continueLabel={pending === 'practice' ? 'Set up the race' : pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
+        continueLabel={pending === 'battle' ? 'Set up the battle' : pending === 'practice' ? 'Set up the race' : pending === 'create' ? 'Continue to room setup' : pending === 'browse' ? 'Continue to rooms' : 'Find a race'}
         onBack={() => setScreen('home')}
         onGarage={() => { setGarageTab('car'); setScreen('garage'); }}
         onContinue={(name) => doPending(pending, name)}
@@ -121,6 +122,8 @@ function AppInner() {
   } else if (screen === 'practice') {
     content = (
       <PracticeSetup
+        key={practiceMode}
+        mode={practiceMode}
         busy={busy}
         onBack={() => setScreen('home')}
         onStart={(o) => void run(() => net.practice(profile.name, profile.appearance, o.settings, o.bots))}

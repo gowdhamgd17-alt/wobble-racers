@@ -246,6 +246,7 @@ describe('authoritative race rules', () => {
     placeOnTrack(a.veh, track, 300, 0);
     placeOnTrack(b.veh, track, 308, 0); // ~18m ahead
     a.state.protectT = 0; b.state.protectT = 0;
+    sr.sim.time = 10; // past the race's weapon hold at the start
     let seq = 1000;
     const firing = setInterval(() => host.room.send(MSG.INPUT, encodeInput(seq++, { ...NEUTRAL_INPUT, fire: true })), 33);
     await until(() => b.state.health < b.state.maxHealth, 3000);

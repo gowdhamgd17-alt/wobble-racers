@@ -699,7 +699,7 @@ export class Game {
           if (near) audio.bounce(vol);
           break;
         case 'reload':
-          if (isMe) { audio.reload(weaponByIndex(amount).id); this.banner = 'RELOADING'; this.bannerT = 0.8; }
+          if (isMe) audio.reload(weaponByIndex(amount).id);
           else if (near) audio.reload(weaponByIndex(amount).id, vol * 0.5);
           break;
         case 'reloaded':
@@ -756,7 +756,8 @@ export class Game {
   private fireball(x: number, y: number, z: number, scale: number) {
     const n = Math.round(40 * scale);
     for (let i = 0; i < n; i++) this.glow.emit(x, y, z, (Math.random() - 0.5) * 16 * scale, Math.random() * 12 * scale, (Math.random() - 0.5) * 16 * scale, i % 3 === 0 ? C_SPARK : i % 3 === 1 ? C_FIRE : C_FLAME, 1.6 * scale, 0.75, { gravity: 4, drag: 2.2, grow: 2 });
-    for (let i = 0; i < n * 0.6; i++) this.smoke.emit(x, y + 1, z, (Math.random() - 0.5) * 6 * scale, 2 + Math.random() * 5, (Math.random() - 0.5) * 6 * scale, C_DARK_SMOKE, 2.6 * scale, 2, { grow: 3.5, drag: 1.2 });
+    // a rising smoke column, kept thin so it never blinds the camera
+    for (let i = 0; i < n * 0.25; i++) this.smoke.emit(x + (Math.random() - 0.5) * 2, y + 1.5, z + (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 3 * scale, 3 + Math.random() * 4, (Math.random() - 0.5) * 3 * scale, Math.random() < 0.5 ? C_DARK_SMOKE : C_SMOKE, 1.5 * scale, 1.6, { grow: 2.2, drag: 1.4 });
     this.debris.burst(x, y, z, ['#3a3a3a', '#6b5a45', '#2a2a33'], Math.round(6 * scale));
   }
 

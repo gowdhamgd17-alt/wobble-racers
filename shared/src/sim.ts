@@ -120,6 +120,9 @@ export function makeBrain(order: number): BotBrain {
   };
 }
 
+/** Seconds after the green light before anyone can shoot in a race. */
+export const RACE_WEAPON_HOLD = 5;
+
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 const wrap = (a: number) => {
   a = (a + Math.PI) % (Math.PI * 2);
@@ -379,7 +382,9 @@ export class GameSim<R extends SimRacer = SimRacer> {
     }
     if (input.reload && p.ammo < w.magazine) return this.startReload(r);
     p.fireCd -= dt;
-    if (!input.fire || !this.settings.weapons) {
+    // Races: guns stay cold for the first seconds so the grid isn't a firing squad.
+    const cold = !this.battle && this.time < RACE_WEAPON_HOLD;
+    if (!input.fire || !this.settings.weapons || cold) {
       if (p.fireCd < 0) p.fireCd = 0;
       return;
     }
@@ -917,7 +922,8 @@ export class GameSim<R extends SimRacer = SimRacer> {
     if (speed > getVehicle(r.p.carClass).maxSpeed * b.skill) inp.throttle = 0;
     inp.nitro = this.settings.nitro && v.nitro > 60 && Math.abs(inp.steer) < 0.15;
     inp.recover = speed < 1;
-    inp.fire = this.botTrigger(r, dt, 120);
+    // Racing bots are pickier: medium range only, and they mostly keep their eyes on the road.
+    inp.fire = this.botTrigger(r, dt, 90) && Math.sin(this.time * 0.9 + b.lane) > -0.2;
     const w = getWeapon(r.p.curWeapon);
     inp.reload = !inp.fire && r.p.ammo < w.magazine * 0.25 && b.aimT === 0;
     return inp;
