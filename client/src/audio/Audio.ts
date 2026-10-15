@@ -9,6 +9,7 @@
 // To swap in recorded samples later, replace the bodies of the one-shots.
 
 import { settingsStore } from '../state/store';
+import { SAAVU_MP3 } from './saavuVoice';
 
 type Ctx = AudioContext;
 
@@ -111,6 +112,7 @@ class AudioSystem {
     this.reverb.connect(conv).connect(comp);
     this.applyVolumes();
     if (this.musicMode !== 'off') this.startMusicLoop();
+    this.loadVoice();
     // Voices load asynchronously in some browsers.
     try {
       // iOS only lets pages speak after a tap: prime the speech engine silently now.
@@ -480,15 +482,64 @@ class AudioSystem {
     if (!voices.length) return;
     const by = (pre: string) => voices.find((v) => v.lang?.toLowerCase().startsWith(pre));
     // Tamil voice says சாவு natively; Hindi reads सावू the same way; otherwise English.
-    const v = by('ta') ?? by('hi') ?? by('en-in') ?? voices.find((x) => /male|david|daniel|alex|fred/i.test(x.name) && x.lang?.startsWith('en')) ?? by('en') ?? voices[0];
+    const male = (pre: string) => voices.find((v) => v.lang?.toLowerCase().startsWith(pre) && /male|man|ravi|hemant|prabhat|valluvar|david|daniel|fred|alex|guy/i.test(v.name) && !/female/i.test(v.name));
+    const v = male('ta') ?? male('hi') ?? male('en') ?? by('ta') ?? by('hi') ?? by('en-in') ?? voices.find((x) => /male|david|daniel|alex|fred/i.test(x.name) && x.lang?.startsWith('en')) ?? by('en') ?? voices[0];
     this.voice = v ?? null;
     this.voiceLang = v?.lang?.toLowerCase() ?? '';
   }
 
   /** Announcer voice: "Saavu!" (Web Speech API, with a synthesised fallback). */
+  private voiceBuf: AudioBuffer | null = null;
+  private voiceBus: GainNode | null = null;
+  private loadVoice() {
+    const ctx = this.ctx;
+    if (!ctx || this.voiceBuf) return;
+    // Own loud bus straight to the speakers through a limiter (not the SFX compressor).
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -2;
+    lim.knee.value = 0;
+    lim.ratio.value = 20;
+    lim.attack.value = 0.001;
+    lim.release.value = 0.1;
+    lim.connect(ctx.destination);
+    this.voiceBus = ctx.createGain();
+    this.voiceBus.connect(lim);
+    // Decode the embedded clip without fetch (data: URLs can be blocked by page security policies).
+    let bytes: ArrayBuffer;
+    try {
+      const bin = atob(SAAVU_MP3.slice(SAAVU_MP3.indexOf(',') + 1));
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      bytes = u8.buffer;
+    } catch {
+      return;
+    }
+    ctx.decodeAudioData(bytes)
+      .then((buf) => { this.voiceBuf = buf; })
+      .catch(() => { /* fall back to speech */ });
+  }
+
+  /** Announcer: a deep, rugged male shout of "Saavu!", loud over the game. */
   sayDeath() {
     const vol = settingsStore.get().sfxVolume;
     if (vol <= 0) return;
+    const ctx = this.ctx;
+    if (ctx && this.voiceBuf && this.voiceBus) {
+      const t = ctx.currentTime;
+      const src = ctx.createBufferSource();
+      src.buffer = this.voiceBuf;
+      const g = ctx.createGain();
+      g.gain.value = Math.min(2.2, 0.9 + vol * 1.6);
+      src.connect(g).connect(this.voiceBus);
+      src.start(t + 0.03);
+      // Duck the rest of the mix so the shout cuts through.
+      this.sfx.gain.cancelScheduledValues(t);
+      this.sfx.gain.setValueAtTime(this.sfx.gain.value, t);
+      this.sfx.gain.linearRampToValueAtTime(vol * 0.35, t + 0.05);
+      this.sfx.gain.setValueAtTime(vol * 0.35, t + 1.0);
+      this.sfx.gain.linearRampToValueAtTime(vol, t + 1.4);
+      return;
+    }
     const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
     if (!this.voice) this.pickVoice();
     if (synth && this.voice) {
@@ -499,8 +550,8 @@ class AudioSystem {
         u.voice = this.voice;
         u.lang = this.voice.lang;
         u.rate = 0.8;
-        u.pitch = 0.55; // deep announcer
-        u.volume = Math.min(1, vol * 1.4);
+        u.pitch = 0.3;
+        u.volume = 1;
         synth.speak(u);
         return;
       } catch {
@@ -551,9 +602,7 @@ class AudioSystem {
     this.sayDeath();
     this.tone('sine', 70, 30, 0.7, 0.6);
     this.burst(0.5, 0.25, 'lowpass', 2000, 100, 0, { brown: true, wet: 0.5 });
-    [392, 523, 659, 784].forEach((f) => this.tone('sawtooth', f, f, 0.6, 0.05, 0.1, 0.6));
-    this.tone('square', 1568, 1568, 0.08, 0.08, 0.1);
-    this.tone('square', 2093, 2093, 0.18, 0.08, 0.2);
+    this.tone('sine', 45, 25, 1.0, 0.5, 0.05);
   }
 
   // ---------------------------------------------------------- ui / race one-shots
