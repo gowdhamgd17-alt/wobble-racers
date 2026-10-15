@@ -307,7 +307,7 @@ export class Game {
     this.onPatch();
     audio.startEngine();
     // Debug/testing hook (only with ?debug in the URL)
-    if (location.search.includes('debug')) (window as unknown as { __game: Game }).__game = this;
+    if (location.search.includes('debug')) Object.assign(window, { __game: this, __audio: audio });
     input.enabled = true;
     input.resetAll();
   }
@@ -627,7 +627,8 @@ export class Game {
   private onFx(list: FxMessage[]) {
     const camPos = this.camera.position;
     for (const msg of list) {
-      const [type, id, x, y, z, amount] = msg;
+      const [type, id, , , , amount] = msg;
+      let [, , x, y, z] = msg;
       const c = this.cars.get(id);
       const isMe = id === net.myId;
       const dist = Math.hypot(camPos.x - x, camPos.z - z);
@@ -636,6 +637,8 @@ export class Game {
       switch (type) {
         case 'hit': {
           const w = msg.length > 6 ? weaponByIndex(msg[6]) : null;
+          // Sparks on the car as you see it (other cars are drawn slightly in the past).
+          if (c && c.status === RacerStatus.RACING && !isMe) { x = c.pos.x; y = c.pos.y + 0.9; z = c.pos.z; }
           const n = w?.kind === 'flame' ? 4 : 14;
           for (let i = 0; i < n; i++) this.glow.emit(x, y, z, (Math.random() - 0.5) * 12, Math.random() * 7, (Math.random() - 0.5) * 12, w?.kind === 'flame' ? C_FIRE : C_SPARK, 0.45, 0.35, { gravity: 18, drag: 1.5 });
           if (c) { c.flash = 1; if (Math.random() < 0.3) c.anim.react('shock', 0.7); }

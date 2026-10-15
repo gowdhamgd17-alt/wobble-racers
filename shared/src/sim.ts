@@ -5,7 +5,7 @@
 // whatever state container they use (Colyseus schema or plain objects).
 
 import {
-  COUNTDOWN_SECONDS, IMPACT_DAMAGE_SCALE, KILL_CREDIT_SECONDS, NITRO, PHYS, PICKUP, Phase, RESPAWN, RacerStatus,
+  COUNTDOWN_SECONDS, IMPACT_DAMAGE_SCALE, SIM_DT, KILL_CREDIT_SECONDS, NITRO, PHYS, PICKUP, Phase, RESPAWN, RacerStatus,
 } from './constants';
 import type { FxMessage, FxType, KillEvent } from './protocol';
 import {
@@ -84,7 +84,11 @@ export interface SimRacer {
   lastHitT: number;
   lastHitWeapon: string;
   mags: number[]; // rounds left in each gun's magazine (index = weapon index)
+  hist?: Pose[]; // recent poses, newest first (lag compensation)
 }
+
+/** Where a car was at one tick. */
+export interface Pose { x: number; y: number; z: number; yaw: number }
 
 export interface SimProjectile {
   id: string;
@@ -95,6 +99,7 @@ export interface SimProjectile {
   life: number;
   idx: number;
   target: string;
+  lag: number; // owner's view delay: hits are tested against cars where the owner saw them
 }
 
 export interface SimPickup {
@@ -123,6 +128,8 @@ export function makeBrain(order: number): BotBrain {
 }
 
 const powerMul = (r: SimRacer) => ((r.p.powerT ?? 0) > 0 ? PICKUP.powerDamage : 1);
+/** Bullets are a bit fat so grazing shots on a car's edge count. */
+const BULLET_RADIUS = 0.3;
 /** Seconds to swap guns. */
 export const WEAPON_SWITCH_TIME = 0.4;
 
@@ -155,6 +162,14 @@ export class GameSim<R extends SimRacer = SimRacer> {
   pairCooldown = new Map<string, number>();
   private projCounter = 0;
   rand: () => number = Math.random;
+  /**
+   * Lag compensation, in seconds: a human player sees other cars a little in
+   * the past (network delay + interpolation), so shots are tested against
+   * where the target was then. Without this, bullets and rockets visibly pass
+   * through cars on screen and miss. Bots see the present (0).
+   */
+  lagCompensation = 0;
+  private static HIST = 24;
 
   constructor(settings: RaceSettings) {
     this.setSettings(settings);
@@ -318,6 +333,7 @@ export class GameSim<R extends SimRacer = SimRacer> {
         if (pk.timer <= 0) pk.active = true;
       }
     }
+    this.recordPoses();
     this.updateRanks();
     for (const r of this.racers.values()) this.sync(r);
     this.checkComplete();
@@ -499,11 +515,13 @@ export class GameSim<R extends SimRacer = SimRacer> {
         const ex = mx + dx * w.range, ez = mz + dz * w.range;
         let t = worldRay(this.world, mx, mz, ex, ez, my, v.trackIdx);
         let hit: SimRacer | null = null;
+        const lag = this.lagOf(r);
         for (const o of this.racers.values()) {
           if (o === r || o.p.status !== RacerStatus.RACING) continue;
-          if (Math.abs(o.veh.y + 0.7 - my) > 2.4) continue;
+          const ps = this.poseAt(o, lag);
+          if (Math.abs(ps.y + 0.7 - my) > 2.6) continue;
           const oc = getVehicle(o.p.carClass);
-          const th = segmentHitsCar(mx, mz, ex, ez, 0.15, o.veh.x, o.veh.z, o.veh.yaw, oc.halfLength, oc.halfWidth);
+          const th = segmentHitsCar(mx, mz, ex, ez, BULLET_RADIUS, ps.x, ps.z, ps.yaw, oc.halfLength, oc.halfWidth);
           if (th >= 0 && th < t) { t = th; hit = o; }
         }
         const hx = mx + dx * w.range * t, hz = mz + dz * w.range * t;
@@ -512,14 +530,16 @@ export class GameSim<R extends SimRacer = SimRacer> {
         else if (t < 1) this.fx('impact', r.id, hx, my, hz, w.index);
       }
     } else if (w.kind === 'flame') {
+      const lag = this.lagOf(r);
       for (const o of this.racers.values()) {
         if (o === r || o.p.status !== RacerStatus.RACING) continue;
-        const dx = o.veh.x - v.x, dz = o.veh.z - v.z;
+        const ps = this.poseAt(o, lag);
+        const dx = ps.x - v.x, dz = ps.z - v.z;
         const d = Math.hypot(dx, dz);
         const reach = w.range + getVehicle(o.p.carClass).halfLength;
-        if (d > reach || Math.abs(o.veh.y - v.y) > 3) continue;
+        if (d > reach || Math.abs(ps.y - v.y) > 3) continue;
         if (Math.abs(wrap(Math.atan2(dx, dz) - v.yaw)) > w.spread + 0.25 / Math.max(1, d / 6)) continue;
-        if (worldRay(this.world, mx, mz, o.veh.x, o.veh.z, my, v.trackIdx) < 0.95) continue;
+        if (worldRay(this.world, mx, mz, ps.x, ps.z, my, v.trackIdx) < 0.95) continue;
         this.applyHit(o, w.damage, w, r, dx / (d || 1), dz / (d || 1), true);
       }
     } else {
@@ -527,9 +547,38 @@ export class GameSim<R extends SimRacer = SimRacer> {
       const sp = w.speed + fwd * 0.6;
       this.projectiles.push({
         id: 'p' + this.projCounter++, owner: r.id, kind: w.id, x: mx, y: my, z: mz,
-        vx: Math.sin(yaw) * sp, vy: w.lift, vz: Math.cos(yaw) * sp, life: w.fuse, idx: v.trackIdx, target,
+        vx: Math.sin(yaw) * sp, vy: w.lift, vz: Math.cos(yaw) * sp, life: w.fuse, idx: v.trackIdx, target, lag: this.lagOf(r),
       });
     }
+  }
+
+  private recordPoses() {
+    for (const r of this.racers.values()) {
+      const h = (r.hist ??= []);
+      const v = r.veh;
+      const pose = h.length >= GameSim.HIST ? h.pop()! : { x: 0, y: 0, z: 0, yaw: 0 };
+      pose.x = v.x; pose.y = v.y; pose.z = v.z; pose.yaw = v.yaw;
+      h.unshift(pose);
+    }
+  }
+
+  private lagOf(r: SimRacer | undefined) {
+    return !r || r.bot ? 0 : this.lagCompensation;
+  }
+
+  /** Target pose `lag` seconds ago (current pose when there is no history yet). */
+  poseAt(o: SimRacer, lag: number): Pose {
+    const h = o.hist;
+    const v = o.veh;
+    if (!h || !h.length || lag <= 0) return v;
+    const k = lag / SIM_DT; // ticks back; hist[0] is the end of the previous tick
+    const i = Math.min(h.length - 1, Math.floor(k));
+    const j = Math.min(h.length - 1, i + 1);
+    const f = Math.min(1, k - i);
+    const a = h[i], b = h[j];
+    // A respawn / recover teleport inside the window: don't blend across it.
+    if ((a.x - b.x) ** 2 + (a.z - b.z) ** 2 > 100) return a;
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, z: a.z + (b.z - a.z) * f, yaw: a.yaw + wrap(b.yaw - a.yaw) * f };
   }
 
   private applyHit(o: SimRacer, dmg: number, w: WeaponDef, by: SimRacer, dx: number, dz: number, quiet = false) {
@@ -579,9 +628,14 @@ export class GameSim<R extends SimRacer = SimRacer> {
       let hit: SimRacer | null = null, bestT = 2;
       for (const o of this.racers.values()) {
         if (o.id === pr.owner || o.p.status !== RacerStatus.RACING) continue;
-        if (Math.abs(o.veh.y + 0.7 - (y0 + pr.y) / 2) > 1.8) continue;
+        // Where the owner saw this car, now and one tick earlier. Sweeping the
+        // projectile in the car's own moving frame means a fast car can't slip
+        // "between" two ticks of a fast rocket.
+        const now = this.poseAt(o, pr.lag), before = this.poseAt(o, pr.lag + dt);
+        if (Math.abs(now.y + 0.7 - (y0 + pr.y) / 2) > 2) continue;
         const oc = getVehicle(o.p.carClass);
-        const t = segmentHitsCar(x0, z0, pr.x, pr.z, 0.35, o.veh.x, o.veh.z, o.veh.yaw, oc.halfLength, oc.halfWidth);
+        const sx = x0 + (now.x - before.x), sz = z0 + (now.z - before.z);
+        const t = segmentHitsCar(sx, sz, pr.x, pr.z, 0.45, now.x, now.z, now.yaw, oc.halfLength, oc.halfWidth);
         if (t >= 0 && t < bestT) { bestT = t; hit = o; }
       }
       const tw = worldRay(this.world, x0, z0, pr.x, pr.z, pr.y, pr.idx);

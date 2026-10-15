@@ -41,6 +41,7 @@ export class LocalRoom {
       settings: { ...settings }, players: new Map(), projectiles: new Map(), pickups: new Map(), finishOrder: [],
     };
     this.sim = new GameSim(this.state.settings);
+    this.sim.lagCompensation = 0.06; // offline view delay (45 ms interpolation + one tick)
     this.add(this.sessionId, name, '#YOU', app, false, 0);
     for (let i = 0; i < bots; i++) {
       this.add(`bot${i}`, BOT_NAMES[i % BOT_NAMES.length], '#BOT', {

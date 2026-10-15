@@ -43,7 +43,7 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 - **10 vehicle classes**, each with its own handling, armour and health pool (280 to 650 HP) and a matching collision footprint: Speedster, Bruiser, Drifter, Muscle, Buggy, Formula, Monster, Jeep, Pickup and a six-wheel Armored Truck.
 - **10 weapons on every vehicle**: switch guns any time during play (each gun keeps its own magazine; switching takes 0.4 s). The Garage sets the gun you start with. The guns: Pistol, SMG, M4 Rifle, Shotgun, Minigun, Sniper, Rocket Launcher, Grenade Launcher, Flamethrower and Homing Missiles. Each has its own damage, fire rate, magazine and reload; bullets are instant with tracers, rockets/grenades/missiles fly and explode with splash damage.
 - **Pickups**: green repair kits restore half your health; wooden power crates reload every gun instantly and give ×1.5 damage for 12 s. Both come back a few seconds after they're taken.
-- **"SAAVU!"**: destroy a car and a big SAAVU! card pops up; everyone sees it in the kill feed, and the victim sees who got them.
+- **"SAAVU!"**: destroy a car and a big SAAVU! card pops up with an announcer voice saying "Saavu!" (the browser's speech voice, Tamil when available; a built-in synthesised voice otherwise); everyone sees it in the kill feed, and the victim sees who got them.
 - **8 drivers**: Professor Bonk, Moolissa, Zip-9, Pepper Pomodoro, Rexford, Luna Vega, Grandpa Gus and Pip, each with their own gag animation.
 - **Detailed procedural models**: smooth extruded bodies with real wheel arches, lathed tyres with sidewalls, tinted glass, chrome, clear-coat paint and studio reflections. Graphics quality Low/Medium lowers the polygon count for phones.
 - **Two course types, any distance**
@@ -189,6 +189,7 @@ The brief suggests Rapier "where appropriate". We use a purpose-built determinis
 - If the host leaves, the earliest-joined connected player becomes host.
 - Disconnected players keep their slot for 20 s (their car stops and becomes a non-colliding ghost). After that they are listed as "Left the race".
 - Races have no time limit: a race ends when every remaining player has finished or left. Battles end at the kill target, when the time limit runs out, or when everyone has left; ties go to fewer deaths.
+- Hits use lag compensation: you see other cars slightly in the past, so the server tests your bullets, flames and rockets against where the target was on your screen (about 0.16 s online). Rockets are swept against each car's own motion so fast cars can't slip between two frames.
 - Kills are credited to whoever last damaged the victim within 8 s (shots, blasts or rams). Nobody takes damage from their own explosions, but they still get shoved.
 - In races, guns stay cold for the first 5 s after the green light.
 - All game rules live in one shared simulation (`shared/src/sim.ts`) used by both the server room and the offline bot mode, so they can never drift apart. Finished players become ghosts and can spectate others.

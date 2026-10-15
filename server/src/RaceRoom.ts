@@ -44,6 +44,8 @@ export class RaceRoom extends Room<RaceState> {
     this.maxClients = state.maxPlayers;
     this.sim = new GameSim<Racer>(state.settings as unknown as RaceSettings);
     this.sim.racers = this.racers;
+    // Clients draw other cars ~110 ms in the past plus network delay: test shots against that.
+    this.sim.lagCompensation = 0.16;
     if (state.isPrivate) await this.setPrivate(true);
     this.setPatchRate(PATCH_RATE_MS);
     this.updateMetadata();

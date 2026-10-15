@@ -111,6 +111,15 @@ class AudioSystem {
     this.reverb.connect(conv).connect(comp);
     this.applyVolumes();
     if (this.musicMode !== 'off') this.startMusicLoop();
+    // Voices load asynchronously in some browsers.
+    try {
+      // iOS only lets pages speak after a tap: prime the speech engine silently now.
+      const prime = new SpeechSynthesisUtterance(' ');
+      prime.volume = 0;
+      window.speechSynthesis?.speak(prime);
+      this.pickVoice();
+      window.speechSynthesis?.addEventListener?.('voiceschanged', () => this.pickVoice());
+    } catch { /* no speech support */ }
   }
 
   private applyVolumes() {
@@ -461,8 +470,85 @@ class AudioSystem {
     this.burst(0.4, 0.06 * vol, 'highpass', 3000, 6000, 0.3);
   }
 
+  // ---------------------------------------------------------- voice-over
+  private voice: SpeechSynthesisVoice | null = null;
+  private voiceLang = '';
+  private pickVoice() {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
+    if (!synth) return;
+    const voices = synth.getVoices();
+    if (!voices.length) return;
+    const by = (pre: string) => voices.find((v) => v.lang?.toLowerCase().startsWith(pre));
+    // Tamil voice says சாவு natively; Hindi reads सावू the same way; otherwise English.
+    const v = by('ta') ?? by('hi') ?? by('en-in') ?? voices.find((x) => /male|david|daniel|alex|fred/i.test(x.name) && x.lang?.startsWith('en')) ?? by('en') ?? voices[0];
+    this.voice = v ?? null;
+    this.voiceLang = v?.lang?.toLowerCase() ?? '';
+  }
+
+  /** Announcer voice: "Saavu!" (Web Speech API, with a synthesised fallback). */
+  sayDeath() {
+    const vol = settingsStore.get().sfxVolume;
+    if (vol <= 0) return;
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
+    if (!this.voice) this.pickVoice();
+    if (synth && this.voice) {
+      try {
+        synth.cancel();
+        const text = this.voiceLang.startsWith('ta') ? 'சாவு!' : this.voiceLang.startsWith('hi') ? 'सावू!' : 'Saavu!';
+        const u = new SpeechSynthesisUtterance(text);
+        u.voice = this.voice;
+        u.lang = this.voice.lang;
+        u.rate = 0.8;
+        u.pitch = 0.55; // deep announcer
+        u.volume = Math.min(1, vol * 1.4);
+        synth.speak(u);
+        return;
+      } catch {
+        /* fall through to the synthesised voice */
+      }
+    }
+    this.formantSaavu();
+  }
+
+  /** Tiny formant synthesiser: "s" + "aa" + "v" + "oo", for browsers without speech. */
+  private formantSaavu() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.02;
+    this.burst(0.16, 0.25, 'highpass', 5500, 4500, 0.02); // "s"
+    const glottal = ctx.createOscillator();
+    glottal.type = 'sawtooth';
+    glottal.frequency.setValueAtTime(115, t0 + 0.14);
+    glottal.frequency.linearRampToValueAtTime(95, t0 + 0.75);
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.setValueAtTime(0.0001, t0 + 0.14);
+    out.gain.exponentialRampToValueAtTime(0.9, t0 + 0.2);
+    out.gain.setValueAtTime(0.9, t0 + 0.42);
+    out.gain.exponentialRampToValueAtTime(0.35, t0 + 0.47); // "v" dip
+    out.gain.exponentialRampToValueAtTime(0.8, t0 + 0.52);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.85);
+    // formant bank: "aa" (800 / 1200 Hz) gliding to "oo" (320 / 800 Hz)
+    const formants: [number, number, number][] = [[800, 320, 1], [1200, 800, 0.6], [2600, 2300, 0.25]];
+    for (const [fa, fu, g] of formants) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 8;
+      bp.frequency.setValueAtTime(fa, t0 + 0.14);
+      bp.frequency.setValueAtTime(fa, t0 + 0.42);
+      bp.frequency.exponentialRampToValueAtTime(fu, t0 + 0.55);
+      const gg = ctx.createGain();
+      gg.gain.value = g * 1.6;
+      glottal.connect(bp).connect(gg).connect(out);
+    }
+    this.out(out, 0.4);
+    glottal.start(t0 + 0.14);
+    glottal.stop(t0 + 0.9);
+  }
+
   /** The killer's "Saavu!" sting. */
   saavu() {
+    this.sayDeath();
     this.tone('sine', 70, 30, 0.7, 0.6);
     this.burst(0.5, 0.25, 'lowpass', 2000, 100, 0, { brown: true, wet: 0.5 });
     [392, 523, 659, 784].forEach((f) => this.tone('sawtooth', f, f, 0.6, 0.05, 0.1, 0.6));

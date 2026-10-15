@@ -252,4 +252,37 @@ describe('game simulation', () => {
     expect(decodeInput(encodeInput(1, { ...NEUTRAL_INPUT, weapon: 9, fire: true }))?.input.weapon).toBe(9);
     expect(decodeInput(encodeInput(1, { ...NEUTRAL_INPUT }))?.input.weapon).toBe(-1);
   });
+
+  it('a rocket hits a fast car crossing its path, and bullets hit where the shooter saw the target', () => {
+    const { sim, racers } = makeSim({ mode: 'battle' }, 2, { human: true, weapons: ['rocket'] });
+    run(sim, 3.2);
+    const [me, a] = racers;
+    a.bot = null;
+    // Fast car crossing a street 30 m ahead, timed to meet the rocket.
+    Object.assign(me.veh, { x: -60, z: -170, yaw: 0, vx: 0, vz: 0, vy: 0, yawRate: 0, grounded: true, y: 0 });
+    Object.assign(a.veh, { x: -60 - 12, z: -140, yaw: Math.PI / 2, vx: 30, vz: 0, vy: 0, yawRate: 0, grounded: true, y: 0 });
+    const hp = a.p.health;
+    me.queue.push({ seq: 1, input: { ...NEUTRAL_INPUT, fire: true } });
+    let seq = 2;
+    for (let i = 0; i < 30; i++) { a.queue.push({ seq: seq++, input: { ...NEUTRAL_INPUT, throttle: 1 } }); sim.tick(SIM_DT); }
+    expect(a.p.health).toBeLessThan(hp - 40); // direct hit, not just splash
+
+    // Lag compensation: the target has since moved 6 m sideways, but the shooter
+    // (who sees the past) aimed at where it was; with compensation that's a hit.
+    const s2 = makeSim({ mode: 'battle' }, 2, { human: true, weapons: ['sniper'] });
+    run(s2.sim, 3.2);
+    const [shooter, target] = s2.racers;
+    target.bot = null;
+    s2.sim.lagCompensation = 0.15;
+    Object.assign(shooter.veh, { x: -60, z: -170, yaw: 0, vx: 0, vz: 0 });
+    Object.assign(target.veh, { x: -60, z: -110, yaw: Math.PI / 2, vx: 0, vz: 0 });
+    for (let i = 0; i < 10; i++) { s2.sim.tick(SIM_DT); } // history at the old spot
+    target.veh.x += 6; // the target has moved on since
+    target.hist!.unshift({ x: target.veh.x, y: 0, z: target.veh.z, yaw: target.veh.yaw });
+    const thp = target.p.health;
+    shooter.p.fireCd = 0;
+    shooter.queue.push({ seq: 99, input: { ...NEUTRAL_INPUT, fire: true } });
+    s2.sim.tick(SIM_DT);
+    expect(target.p.health).toBeLessThan(thp);
+  });
 });
