@@ -35,7 +35,7 @@ export function useStore<T extends object>(store: { get: () => T; subscribe: (l:
 
 export type ControlMode = 'auto' | 'touch' | 'keyboard';
 export type Quality = 'auto' | 'low' | 'medium' | 'high';
-export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'reload' | 'prevWeapon' | 'nextWeapon' | 'recover' | 'pause';
+export type Action = 'accelerate' | 'brake' | 'left' | 'right' | 'drift' | 'nitro' | 'fire' | 'reload' | 'prevWeapon' | 'nextWeapon' | 'recover' | 'talk' | 'pause';
 
 export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   accelerate: ['KeyW', 'ArrowUp'],
@@ -49,6 +49,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   prevWeapon: ['KeyQ'],
   nextWeapon: ['KeyE'],
   recover: ['KeyR'],
+  talk: ['KeyV'],
   pause: ['Escape', 'KeyP'],
 };
 
@@ -61,6 +62,8 @@ export interface Settings {
   touchScale: number; // 0.8..1.3
   autoGas: boolean;
   haptics: boolean;
+  voiceMode: 'ptt' | 'open'; // push-to-talk or open mic
+  voiceVolume: number;
   showFps: boolean;
   bindings: Record<Action, string[]>;
 }
@@ -74,6 +77,8 @@ export const DEFAULT_GAME_SETTINGS: Settings = {
   touchScale: 1,
   autoGas: false,
   haptics: true,
+  voiceMode: 'ptt',
+  voiceVolume: 1,
   showFps: false,
   bindings: DEFAULT_BINDINGS,
 };
@@ -99,6 +104,8 @@ export const settingsStore = createStore<Settings>('wobble.settings', DEFAULT_GA
     touchScale: num(r.touchScale, 0.8, 1.3, 1),
     autoGas: r.autoGas === true,
     haptics: r.haptics !== false,
+    voiceMode: r.voiceMode === 'open' ? 'open' : 'ptt',
+    voiceVolume: num(r.voiceVolume, 0, 1.5, 1),
     showFps: r.showFps === true,
     bindings,
   };

@@ -384,3 +384,29 @@ describe('battleground mode', () => {
     await leaveAll();
   });
 });
+
+describe('voice chat signalling', () => {
+  it('relays offers / answers / ICE only between players in the same room, with limits', async () => {
+    const l = await lobby(2);
+    const a = l.host.room, b = l.guests[0].room;
+    const got: any[] = [];
+    b.onMessage(MSG.RTC, (m: any) => got.push(m));
+    a.onMessage(MSG.RTC, () => {});
+    a.send(MSG.VOICE, { on: true });
+    await until(() => a.state.players.get(a.sessionId)?.voice === true);
+    a.send(MSG.RTC, { to: b.sessionId, kind: 'offer', data: { type: 'offer', sdp: 'v=0' } });
+    a.send(MSG.RTC, { to: b.sessionId, kind: 'ice', data: { candidate: 'x' } });
+    await until(() => got.length === 2);
+    expect(got[0]).toEqual({ from: a.sessionId, kind: 'offer', data: { type: 'offer', sdp: 'v=0' } });
+    // malformed / oversized / unknown target / self are dropped
+    a.send(MSG.RTC, { to: b.sessionId, kind: 'hack', data: 1 });
+    a.send(MSG.RTC, { to: b.sessionId, kind: 'offer', data: 'x'.repeat(20000) });
+    a.send(MSG.RTC, { to: 'nobody', kind: 'offer', data: {} });
+    // a flood is rate limited
+    for (let i = 0; i < 200; i++) a.send(MSG.RTC, { to: b.sessionId, kind: 'ice', data: { i } });
+    await sleep(400);
+    expect(got.length).toBeLessThan(100);
+    expect(got.every((m) => m.from === a.sessionId && m.kind !== 'hack')).toBe(true);
+    await leaveAll();
+  });
+});

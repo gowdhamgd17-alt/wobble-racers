@@ -386,3 +386,16 @@ p { margin: 0; }
 .gun-bar button .gk { position: absolute; top: 1px; left: 3px; font-size: 0.8em; opacity: 0.6; }
 .gun-bar button.on { background: var(--sun); color: var(--ink); border-color: var(--ink); }
 .power-badge { font-family: var(--font-display); font-size: calc(13px * var(--ui)); color: var(--ink); background: var(--sun); border-radius: 8px; padding: 2px 8px; text-align: center; animation: blink 0.8s steps(2) infinite; }
+
+/* voice chat */
+.voice-panel { padding: var(--s-3) var(--s-4); }
+.talk-btn { border: var(--border); background: var(--paper); color: var(--ink); border-radius: 999px; padding: 8px 16px; font-family: var(--font-display); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.talk-btn.live { background: var(--tomato); color: var(--paper); box-shadow: 0 0 0 4px rgba(255,90,78,0.35); }
+.voice-badge { border: none; background: transparent; cursor: pointer; font-size: 0.95em; padding: 0 2px; line-height: 1; }
+.voice-badge.talking { filter: drop-shadow(0 0 6px var(--mint)); animation: pop 0.3s ease-out; }
+.voice-badge.muted { opacity: 0.6; }
+.voice-hud-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; pointer-events: auto; }
+.hud-btn.voice-hud { touch-action: none; user-select: none; -webkit-user-select: none; }
+.hud-btn.voice-hud.live { background: var(--tomato); border-color: var(--paper); box-shadow: 0 0 12px rgba(255,90,78,0.8); }
+.talkers { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
+.talker { background: rgba(29,31,63,0.75); color: var(--mint); border-radius: 8px; padding: 2px 8px; font-size: calc(12px * var(--ui)); white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; animation: pop 0.2s ease-out; }

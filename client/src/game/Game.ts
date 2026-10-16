@@ -12,6 +12,7 @@ import {
 import { net } from '../net/Net';
 import { input, haptic } from '../input/Input';
 import { audio } from '../audio/Audio';
+import { voice } from '../net/Voice';
 import { settingsStore, type Quality } from '../state/store';
 import { buildCar, CharacterAnimator, disposeCar, environmentFor, makeNameTag, setCarGun, setModelDetail, type CarParts } from './models';
 import { buildTrackView, type TrackView } from './trackMesh';
@@ -1235,7 +1236,26 @@ export class Game {
   }
 
   private engineClass = '';
+  private proxTimer = 0;
+  private proxGains = new Map<string, number>();
+  /** Battleground proximity voice: nearby drivers loud, far ones quiet. */
+  private updateVoiceProximity(dt: number) {
+    this.proxTimer -= dt;
+    if (this.proxTimer > 0 || !voice.joined) return;
+    this.proxTimer = 0.25;
+    if (!this.arena) { voice.setProximity(null); return; }
+    const me = this.cars.get(net.myId);
+    if (!me) return;
+    this.proxGains.clear();
+    for (const c of this.cars.values()) {
+      if (c.id === net.myId) continue;
+      const d = c.pos.distanceTo(me.pos);
+      this.proxGains.set(c.id, d < 40 ? 1 : Math.max(0.15, 1 - (d - 40) / 220));
+    }
+    voice.setProximity(this.proxGains);
+  }
   private updateAudio(phase: string) {
+    this.updateVoiceProximity(1 / 30);
     const me = this.cars.get(net.myId);
     const active = !!me && (phase === Phase.RACING || phase === Phase.COUNTDOWN) && me.status !== RacerStatus.DESTROYED && !this.paused;
     const cls = net.room?.state?.players?.get(net.myId)?.carClass ?? 'drifter';

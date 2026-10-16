@@ -4,6 +4,7 @@ import type { RoomSnap } from '../../net/Net';
 import { net } from '../../net/Net';
 import { Btn, Thumb, useToast } from '../components/common';
 import { SettingsFields } from './Rooms';
+import { VoiceBadge, VoicePanel } from '../components/Voice';
 
 export function Lobby({ snap, myId, onGarage, onLeave }: { snap: RoomSnap; myId: string; onGarage: () => void; onLeave: () => void }) {
   const toast = useToast();
@@ -38,12 +39,13 @@ export function Lobby({ snap, myId, onGarage, onLeave }: { snap: RoomSnap; myId:
         </div>
         <div className="split" style={{ gridTemplateColumns: '1.6fr 1fr' }}>
           <div className="stack">
+            <VoicePanel />
             <div className="slots">
               {snap.players.map((p) => (
                 <div key={p.id} className={`slot ${p.id === myId ? 'me' : ''} ${p.connected ? '' : 'away'}`}>
                   <Thumb appearance={p} alt={`${p.name}'s car`} />
                   <div style={{ minWidth: 0 }}>
-                    <div className="name">{p.name} <span className="small muted">{p.tag}</span></div>
+                    <div className="name">{p.name} <span className="small muted">{p.tag}</span> <VoiceBadge id={p.id} inVoice={p.voice} me={p.id === myId} /></div>
                     <div className="meta">
                       <span className="dot" style={{ background: colorHex(p.colorMain) }} />
                       {VEHICLES[p.carClass as 'drifter']?.label} · {characterInfo(p.character).name}

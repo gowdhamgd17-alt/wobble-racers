@@ -1,6 +1,6 @@
 import { Client, Room } from 'colyseus.js';
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_SETTINGS, MSG, ROOM_NAME, sanitizeSettings, type Appearance, type FxMessage, type KillEvent, type RaceSettings } from '@wobble/shared';
+import { DEFAULT_SETTINGS, MSG, ROOM_NAME, sanitizeSettings, type Appearance, type FxMessage, type KillEvent, type RaceSettings, type RtcSignal } from '@wobble/shared';
 import { LocalRoom } from './LocalRoom';
 
 export function serverUrls() {
@@ -24,6 +24,7 @@ export interface PlayerSnap {
   colorWheel: string;
   wheelStyle: string;
   weapon: string;
+  voice: boolean;
   kills: number;
   deaths: number;
   ready: boolean;
@@ -122,6 +123,9 @@ class NetSession {
   onFx(l: (fx: FxMessage[]) => void) { this.fxListeners.add(l); return () => { this.fxListeners.delete(l); }; }
   private killListeners = new Set<(k: KillEvent[]) => void>();
   onKill(l: (k: KillEvent[]) => void) { this.killListeners.add(l); return () => { this.killListeners.delete(l); }; }
+  private rtcListeners = new Set<(m: RtcSignal) => void>();
+  /** Voice-chat signalling relayed by the server. */
+  onRtc(l: (m: RtcSignal) => void) { this.rtcListeners.add(l); return () => { this.rtcListeners.delete(l); }; }
   onServerError(l: (e: { code: string; message: string }) => void) { this.errorListeners.add(l); return () => { this.errorListeners.delete(l); }; }
   /** Fires on every state patch (used by the game loop, not React). */
   onPatch(l: () => void) { this.patchListeners.add(l); return () => { this.patchListeners.delete(l); }; }
@@ -155,6 +159,7 @@ class NetSession {
     });
     room.onMessage(MSG.FX, (list: FxMessage[]) => this.fxListeners.forEach((l) => l(list)));
     room.onMessage(MSG.KILL, (list: KillEvent[]) => this.killListeners.forEach((l) => l(list)));
+    if (!this.offline) room.onMessage(MSG.RTC, (m: RtcSignal) => this.rtcListeners.forEach((l) => l(m)));
     room.onMessage(MSG.ERROR, (e: { code: string; message: string }) => this.errorListeners.forEach((l) => l(e)));
     room.onMessage(MSG.WELCOME, () => {});
     room.onLeave((code) => this.handleLeave(room, code));
@@ -280,7 +285,7 @@ function buildSnap(s: any): RoomSnap {
     players.push({
       id: p.id, name: p.name, tag: p.tag, carClass: p.carClass, character: p.character,
       colorMain: p.colorMain, colorSecondary: p.colorSecondary, colorWheel: p.colorWheel, wheelStyle: p.wheelStyle,
-      weapon: p.weapon, kills: p.kills ?? 0, deaths: p.deaths ?? 0,
+      weapon: p.weapon, voice: !!p.voice, kills: p.kills ?? 0, deaths: p.deaths ?? 0,
       ready: p.ready, isHost: p.isHost, connected: p.connected, status: p.status, health: p.health,
       laps: p.laps, rank: p.rank, finishPlace: p.finishPlace, joinOrder: p.joinOrder,
     });

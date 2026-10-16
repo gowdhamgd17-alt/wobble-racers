@@ -4,7 +4,7 @@ import { Btn, Segmented, Toggle } from '../components/common';
 
 const ACTION_LABELS: Record<Action, string> = {
   accelerate: 'Accelerate', brake: 'Brake / reverse', left: 'Steer left', right: 'Steer right',
-  drift: 'Handbrake / drift', nitro: 'Nitro', fire: 'Fire weapon', reload: 'Reload', prevWeapon: 'Previous gun', nextWeapon: 'Next gun', recover: 'Recover car (when stuck)', pause: 'Pause',
+  drift: 'Handbrake / drift', nitro: 'Nitro', fire: 'Fire weapon', reload: 'Reload', prevWeapon: 'Previous gun', nextWeapon: 'Next gun', recover: 'Recover car (when stuck)', talk: 'Push to talk', pause: 'Pause',
 };
 
 function keyLabel(code: string) {

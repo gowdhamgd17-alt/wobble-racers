@@ -7,6 +7,7 @@ import { settingsStore, useStore, type Action } from '../../state/store';
 import { audio } from '../../audio/Audio';
 import { Btn } from '../components/common';
 import { SettingsPanel } from './SettingsPanel';
+import { VoiceHud } from '../components/Voice';
 
 export function Race({ onLeave }: { onLeave: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -133,6 +134,7 @@ export function Race({ onLeave }: { onLeave: () => void }) {
           <canvas ref={miniRef} className="minimap" aria-label="Track map" />
           <div className="stack" style={{ gap: 6 }}>
             <button className="hud-btn" aria-label="Pause" onClick={() => setPaused(true)}>❚❚</button>
+            <VoiceHud names={new Map((h?.leaderboard ?? []).map((r) => [r.id, r.me ? 'You' : r.name]))} />
             {!touchUI && <button className="hud-btn" aria-label="Recover car" title="Recover (R)" onPointerDown={() => input.pointerDown(-99, 'recover')} onPointerUp={() => input.pointerUp(-99)} onPointerLeave={() => input.pointerUp(-99)}>⟲</button>}
           </div>
         </div>

@@ -2,7 +2,7 @@ import { Client, Room, ServerError } from '@colyseus/core';
 import {
   GameSim, INPUT_LIMITS, MIN_PLAYERS_TO_START, MSG, NEUTRAL_INPUT, Phase,
   RECONNECT_GRACE_SECONDS, RESPAWN, RacerStatus, SIM_HZ, SIM_DT, PATCH_RATE_MS,
-  createSimRacer, decodeInput, sanitizeAppearance, sanitizeMaxPlayers, sanitizeSettings, validateDisplayName, validateRoomName,
+  createSimRacer, decodeInput, sanitizeRtc, sanitizeAppearance, sanitizeMaxPlayers, sanitizeSettings, validateDisplayName, validateRoomName,
   worldName, type FxType, type RaceSettings, type SimPlayer, type SimRacer,
 } from '@wobble/shared';
 import { PickupState, PlayerState, ProjectileState, RaceState } from './schema';
@@ -14,6 +14,7 @@ type Racer = SimRacer & {
   inputTokens: number;
   actionTokens: number;
   rejectedInputs: number;
+  rtcTokens: number;
 };
 
 export interface CreateOptions {
@@ -61,6 +62,11 @@ export class RaceRoom extends Room<RaceState> {
       const r = this.racers.get(client.sessionId);
       if (r) this.sim.fx('wave', r.sessionId, r.veh.x, r.veh.y, r.veh.z, 0);
     }));
+    this.onMessage(MSG.RTC, (client, raw) => this.handleRtc(client, raw));
+    this.onMessage(MSG.VOICE, (client, raw) => this.action(client, () => {
+      const p = this.state.players.get(client.sessionId);
+      if (p) p.voice = !!raw && typeof raw === 'object' && (raw as { on?: unknown }).on === true;
+    }));
     this.onMessage('*', (client) => this.sendError(client, 'bad_message', 'Unknown message.'));
 
     this.setSimulationInterval((dtMs) => this.tick(dtMs), 1000 / SIM_HZ);
@@ -69,6 +75,7 @@ export class RaceRoom extends Room<RaceState> {
       for (const r of this.racers.values()) {
         r.inputTokens = Math.min(INPUT_LIMITS.maxPerSecond, r.inputTokens + INPUT_LIMITS.maxPerSecond / 10);
         r.actionTokens = Math.min(10, r.actionTokens + 1);
+        r.rtcTokens = Math.min(60, r.rtcTokens + 3);
       }
     }, 100);
   }
@@ -104,6 +111,7 @@ export class RaceRoom extends Room<RaceState> {
     if (!r) return;
     r.state.connected = false;
     r.state.ready = false;
+    r.state.voice = false;
     r.queue.length = 0;
     r.input = { ...NEUTRAL_INPUT };
     const racing = this.inRace();
@@ -160,7 +168,7 @@ export class RaceRoom extends Room<RaceState> {
   private makeRacer(id: string, state: PlayerState): Racer {
     const base = createSimRacer(id, state as unknown as SimPlayer, false, state.joinOrder);
     return Object.assign(base, {
-      sessionId: id, state, inputTokens: INPUT_LIMITS.maxPerSecond, actionTokens: 10, rejectedInputs: 0,
+      sessionId: id, state, inputTokens: INPUT_LIMITS.maxPerSecond, actionTokens: 10, rejectedInputs: 0, rtcTokens: 60,
     });
   }
 
@@ -336,6 +344,24 @@ export class RaceRoom extends Room<RaceState> {
     if (!this.state.players.get(this.state.hostId)) this.reassignHost();
     this.refreshLobbyPhase();
     if (this.connectedCount() < this.state.maxPlayers) void this.unlock();
+  }
+
+  // ---------------------------------------------------------------- voice signalling
+
+  /**
+   * Relay WebRTC offers / answers / ICE candidates between two players in this
+   * room. The server never sees audio; it only introduces the browsers.
+   */
+  handleRtc(client: Client, raw: unknown) {
+    const r = this.racers.get(client.sessionId);
+    if (!r || !r.state.connected) return;
+    if (r.rtcTokens < 1) return;
+    r.rtcTokens -= 1;
+    const msg = sanitizeRtc(raw);
+    if (!msg || msg.to === client.sessionId) return;
+    const target = this.clients.find((c) => c.sessionId === msg.to);
+    if (!target) return;
+    target.send(MSG.RTC, { from: client.sessionId, kind: msg.kind, data: msg.data });
   }
 
   // ---------------------------------------------------------------- input

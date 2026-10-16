@@ -17,7 +17,25 @@ export const MSG = {
   ERROR: 'err',
   WELCOME: 'welcome',
   KILL: 'kill', // KillEvent[]
+  // voice chat (WebRTC signalling relayed by the server; audio itself is peer to peer)
+  RTC: 'rtc', // client -> server: { to, kind, data }   server -> client: { from, kind, data }
+  VOICE: 'voice', // client -> server: { on: boolean }
 } as const;
+
+export type RtcKind = 'offer' | 'answer' | 'ice' | 'bye';
+export interface RtcSignal { to?: string; from?: string; kind: RtcKind; data?: unknown }
+
+/** Validates a client's signalling message; returns null when it's malformed or too big. */
+export function sanitizeRtc(raw: unknown): { to: string; kind: RtcKind; data: unknown } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.to !== 'string' || r.to.length > 64) return null;
+  if (r.kind !== 'offer' && r.kind !== 'answer' && r.kind !== 'ice' && r.kind !== 'bye') return null;
+  let size = 0;
+  try { size = JSON.stringify(r.data ?? null).length; } catch { return null; }
+  if (size > 16000) return null;
+  return { to: r.to, kind: r.kind, data: r.data ?? null };
+}
 
 export type FxType =
   | 'hit' // projectile hit

@@ -51,7 +51,7 @@ export async function createGameServer(opts: AppOptions) {
 
   const httpServer = createServer(app);
   const gameServer = new Server({
-    transport: new WebSocketTransport({ server: httpServer, pingInterval: 3000, pingMaxRetries: 3 }),
+    transport: new WebSocketTransport({ server: httpServer, pingInterval: 3000, pingMaxRetries: 3, maxPayload: 32 * 1024 }), // room for voice-chat SDP offers
   });
   gameServer.define(ROOM_NAME, RaceRoom);
   await gameServer.listen(opts.port);

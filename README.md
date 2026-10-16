@@ -51,6 +51,7 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
   - *Straight sprint*: Canyon Run or Coast Road from a START gate to a FINISH gate, 1 to 10 km, with kilometre boards along the way.
   - Ramps and boost pads are placed automatically on the straightest stretches, so every length gets jumps.
 - **Real-size collisions**: cars collide as oriented boxes that match each body, so noses and tails can no longer slide into each other. Every corner of the car stays inside the barriers, sprints have end walls, blaster hits use the real body shape, and respawns keep a full car length clear. Spawn-protected cars are still solid; they just can't be damaged.
+- **Voice chat** in online rooms: tap *Join voice* in the lobby (or 🎤 during a race). Push-to-talk (hold **V** or the mic button) or open mic, a voice volume slider, tap a player's speaker icon to mute them, and live "who's talking" indicators. In the Battleground it's proximity voice: nearby drivers are loud, far ones quiet. Audio goes directly between browsers (WebRTC, Opus capped at 24 kbps with silence suppression); the game server only relays the connection set-up. Players on very strict networks may need a TURN relay: set `VITE_TURN_URL`, `VITE_TURN_USER`, `VITE_TURN_PASS` at build time.
 - **Play vs bots offline**: race or Battleground with no server, 1 to 14 bots. Battle bots hunt the nearest enemy, steer around buildings and go for repair kits when hurt.
 
 ## Controls
@@ -66,6 +67,7 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 | Reload | R | RELOAD |
 | Switch gun | 1–9, 0 pick a gun · Q / E previous / next · or click the gun bar | GUN ▸ (or tap the gun bar) |
 | Recover stuck car | R (only acts when stuck or flipped) | ⟲ |
+| Push to talk (voice chat) | V | 🎤 (hold) |
 | Pause | Esc / P | ❚❚ |
 
 The control scheme is chosen automatically from the input you used last, so touch laptops can switch between keyboard and touch without a reload. Settings lets you force a mode, resize touch buttons, turn on auto-gas, adjust camera follow speed, graphics quality and separate SFX / music volumes. Phones play in landscape; in portrait a rotate prompt appears and your car coasts.
