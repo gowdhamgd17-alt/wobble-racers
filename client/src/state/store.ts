@@ -64,6 +64,9 @@ export interface Settings {
   haptics: boolean;
   voiceMode: 'ptt' | 'open'; // push-to-talk or open mic
   voiceVolume: number;
+  /** Custom on-screen control positions: centre in % of the screen, size multiplier. */
+  touchLayout: Record<string, TouchSpot>;
+  autoFullscreen: boolean;
   showFps: boolean;
   bindings: Record<Action, string[]>;
 }
@@ -79,9 +82,25 @@ export const DEFAULT_GAME_SETTINGS: Settings = {
   haptics: true,
   voiceMode: 'ptt',
   voiceVolume: 1,
+  touchLayout: {},
+  autoFullscreen: true,
   showFps: false,
   bindings: DEFAULT_BINDINGS,
 };
+
+export interface TouchSpot { x: number; y: number; s: number }
+function sanitizeLayout(raw: unknown): Record<string, TouchSpot> {
+  const out: Record<string, TouchSpot> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[a-z]{2,12}$/.test(k) || !v || typeof v !== 'object') continue;
+    const o = v as Record<string, unknown>;
+    const n = (x: unknown, lo: number, hi: number) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : NaN);
+    const spot = { x: n(o.x, 2, 98), y: n(o.y, 2, 98), s: n(o.s, 0.5, 2) };
+    if (!Number.isNaN(spot.x) && !Number.isNaN(spot.y) && !Number.isNaN(spot.s)) out[k] = spot;
+  }
+  return out;
+}
 
 export const settingsStore = createStore<Settings>('wobble.settings', DEFAULT_GAME_SETTINGS, (raw) => {
   const r = (raw ?? {}) as Partial<Settings>;
@@ -106,6 +125,8 @@ export const settingsStore = createStore<Settings>('wobble.settings', DEFAULT_GA
     haptics: r.haptics !== false,
     voiceMode: r.voiceMode === 'open' ? 'open' : 'ptt',
     voiceVolume: num(r.voiceVolume, 0, 1.5, 1),
+    touchLayout: sanitizeLayout(r.touchLayout),
+    autoFullscreen: r.autoFullscreen !== false,
     showFps: r.showFps === true,
     bindings,
   };

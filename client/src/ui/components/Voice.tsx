@@ -2,6 +2,10 @@ import { useSyncExternalStore, type PointerEvent as RPointerEvent } from 'react'
 import { voice } from '../../net/Voice';
 import { settingsStore, useStore } from '../../state/store';
 import { Btn } from './common';
+import { input } from '../../input/Input';
+
+/** Phones and tablets: tap the mic once to talk, tap again to stop. */
+const tapToTalk = () => input.wantsTouchUI() || input.coarse;
 
 export function useVoice() {
   useSyncExternalStore(voice.subscribe, voice.getVersion, voice.getVersion);
@@ -53,12 +57,12 @@ export function VoicePanel() {
       {v.status !== 'listen-only' && (
         <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
           <div className="seg">
-            <button aria-pressed={v.mode === 'ptt'} onClick={() => v.setMode('ptt')}>Push to talk ({talkKey})</button>
+            <button aria-pressed={v.mode === 'ptt'} onClick={() => v.setMode('ptt')}>{tapToTalk() ? 'Tap to talk' : `Push to talk (${talkKey})`}</button>
             <button aria-pressed={v.mode === 'open'} onClick={() => v.setMode('open')}>Open mic</button>
           </div>
-          {v.mode === 'ptt' && (
-            <button className={`talk-btn ${v.talking ? 'live' : ''}`} {...holdProps('lobby')}>{v.talking ? '🎙 Talking…' : '🎙 Hold to talk'}</button>
-          )}
+          {v.mode === 'ptt' && (tapToTalk()
+            ? <button className={`talk-btn ${v.talking ? 'live' : ''}`} onClick={() => v.toggleTalk()}>{v.talking ? '🎙 Mic ON · tap to stop' : '🎙 Tap to talk'}</button>
+            : <button className={`talk-btn ${v.talking ? 'live' : ''}`} {...holdProps('lobby')}>{v.talking ? '🎙 Talking…' : '🎙 Hold to talk'}</button>)}
         </div>
       )}
       <label className="small">Voice volume
@@ -95,6 +99,8 @@ export function VoiceHud({ names }: { names: Map<string, string> }) {
     <div className="voice-hud-wrap">
       {v.status === 'listen-only' ? (
         <button className="hud-btn voice-hud" title="Listening only (no microphone)" aria-label="Leave voice chat" onClick={() => v.leave()}>🔈</button>
+      ) : tapToTalk() ? (
+        <button className={`hud-btn voice-hud ${v.talking ? 'live' : ''}`} aria-label={v.talking ? 'Mic on, tap to mute' : 'Tap to talk'} title={v.talking ? 'Mic on (tap to stop)' : 'Tap to talk'} onClick={() => v.toggleTalk()}>{v.talking ? '🎙' : '🎤'}</button>
       ) : v.mode === 'ptt' ? (
         <button className={`hud-btn voice-hud ${v.talking ? 'live' : ''}`} aria-label="Hold to talk" title={`Hold to talk (${keyName(settings.bindings.talk[0] ?? 'KeyV')})`} {...holdProps('hud')}>{v.talking ? '🎙' : '🎤'}</button>
       ) : (

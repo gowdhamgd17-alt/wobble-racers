@@ -399,3 +399,44 @@ p { margin: 0; }
 .hud-btn.voice-hud.live { background: var(--tomato); border-color: var(--paper); box-shadow: 0 0 12px rgba(255,90,78,0.8); }
 .talkers { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
 .talker { background: rgba(29,31,63,0.75); color: var(--mint); border-radius: 8px; padding: 2px 8px; font-size: calc(12px * var(--ui)); white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; animation: pop 0.2s ease-out; }
+
+/* ------------------------------------------------------------------ mobile controls (v2) */
+.touch { position: absolute; inset: 0; z-index: 3; pointer-events: none; --tb: calc(min(19vh, 12.5vw, 104px) * var(--touch-scale, 1)); }
+.touch .tbtn {
+  position: absolute; transform: translate(-50%, -50%); width: var(--size); height: var(--size);
+  pointer-events: auto; border-radius: 50%; display: grid; place-items: center; align-content: center;
+  background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.28), rgba(29,31,63,0.42) 70%);
+  border: 2.5px solid rgba(255,255,255,0.75); color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,0.25), inset 0 -4px 0 rgba(0,0,0,0.18);
+  font-family: var(--font-display); font-size: calc(var(--size) * 0.2); letter-spacing: 0.5px;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); transition: transform 0.06s, background 0.06s;
+}
+.touch .tbtn svg { width: 46%; height: 46%; pointer-events: none; }
+.touch .tbtn.icon .tlabel { font-size: calc(var(--size) * 0.14); margin-top: -2px; pointer-events: none; }
+.touch .tbtn.icon:has(.tlabel) svg { width: 38%; height: 38%; }
+.touch .tbtn.gas { background: radial-gradient(circle at 35% 30%, rgba(160,255,200,0.5), rgba(34,153,95,0.55) 70%); }
+.touch .tbtn.brake { background: radial-gradient(circle at 35% 30%, rgba(255,190,180,0.45), rgba(199,58,48,0.5) 70%); }
+.touch .tbtn.fire { background: radial-gradient(circle at 35% 30%, rgba(255,220,150,0.5), rgba(224,120,0,0.55) 70%); }
+.touch .tbtn.nitro { background: radial-gradient(circle at 35% 30%, rgba(170,240,255,0.5), rgba(38,148,184,0.55) 70%); }
+.touch .tbtn.text { font-size: calc(var(--size) * 0.19); }
+.touch .tbtn.down { transform: translate(-50%, -50%) scale(0.9); background: rgba(255,210,63,0.85); color: var(--ink); border-color: #fff; }
+.touch.editing { pointer-events: auto; background: rgba(29,31,63,0.35); z-index: 40; }
+.touch.editing .tbtn { outline: 2px dashed rgba(255,255,255,0.7); outline-offset: 4px; cursor: grab; }
+.touch.editing .tbtn.selected { outline: 3px solid var(--sun); }
+.touch-editbar { position: absolute; top: calc(10px + var(--safe-top)); left: 50%; transform: translateX(-50%); pointer-events: auto; display: flex; gap: 8px; align-items: center; background: var(--ink); color: var(--paper); border: 3px solid var(--paper); border-radius: 16px; padding: 6px 10px; max-width: 94vw; flex-wrap: wrap; justify-content: center; }
+.touch-editbar button { font-family: var(--font-display); font-size: 16px; min-width: 44px; min-height: 40px; border-radius: 12px; border: 2px solid var(--paper); background: transparent; color: var(--paper); padding: 0 12px; }
+.touch-editbar button.primary { background: var(--sun); color: var(--ink); border-color: var(--sun); }
+.touch-editbar button:disabled { opacity: 0.4; }
+
+/* mobile: play like an app */
+.touch-mode .gun-bar { display: none; }
+.touch-mode .minimap { width: calc(96px * var(--ui)); height: calc(96px * var(--ui)); border-radius: 50%; }
+.touch-mode .hud-tr .stack { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 100px; }
+.touch-mode .hud-btn { min-width: 40px; min-height: 40px; font-size: 18px; border-radius: 50%; padding: 0; }
+.touch-mode .hud-panel { padding: 4px 10px; }
+.touch-mode .weapon-row .ammo { font-size: calc(20px * var(--ui)); }
+html, body { overscroll-behavior: none; }
+.race-root { -webkit-tap-highlight-color: transparent; }
+.touch .tbtn.icon:has(.tlabel) svg { width: 44%; height: 44%; }
+.touch-mode .killfeed { top: calc(10px + 74px * var(--ui) + var(--safe-top)); left: calc(10px + var(--safe-left)); right: auto; align-items: flex-start; max-width: 40vw; }
+.touch-mode .kf:nth-last-child(n + 4) { display: none; }

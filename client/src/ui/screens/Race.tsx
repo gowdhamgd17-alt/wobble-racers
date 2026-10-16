@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Phase, RacerStatus, WEAPONS } from '@wobble/shared';
 import { Game, ordinal, webglAvailable, type HudData } from '../../game/Game';
 import { haptic, input } from '../../input/Input';
@@ -8,6 +8,7 @@ import { audio } from '../../audio/Audio';
 import { Btn } from '../components/common';
 import { SettingsPanel } from './SettingsPanel';
 import { VoiceHud } from '../components/Voice';
+import { TouchControls } from '../components/TouchControls';
 
 export function Race({ onLeave }: { onLeave: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -20,6 +21,13 @@ export function Race({ onLeave }: { onLeave: () => void }) {
   const [fatal, setFatal] = useState(() => (webglAvailable() ? '' : 'Your browser or device does not support WebGL, which WOBBLE RACERS needs for 3D graphics.'));
   const [touchUI, setTouchUI] = useState(input.wantsTouchUI());
   const [portrait, setPortrait] = useState(false);
+  const [editingControls, setEditingControls] = useState(false);
+  const [isFull, setIsFull] = useState(!!document.fullscreenElement);
+  useEffect(() => {
+    const on = () => setIsFull(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', on);
+    return () => document.removeEventListener('fullscreenchange', on);
+  }, []);
   const settings = useStore(settingsStore);
   const { status } = useNet();
 
@@ -48,7 +56,7 @@ export function Race({ onLeave }: { onLeave: () => void }) {
   }, []);
 
   useEffect(() => input.onPause(() => setPaused((p) => !p)), []);
-  useEffect(() => { gameRef.current?.setPaused(paused || showSettings); }, [paused, showSettings]);
+  useEffect(() => { gameRef.current?.setPaused(paused || showSettings || editingControls); }, [paused, showSettings, editingControls]);
 
   // Portrait phones: pause input and ask to rotate.
   useEffect(() => {
@@ -64,6 +72,13 @@ export function Race({ onLeave }: { onLeave: () => void }) {
     return () => { window.removeEventListener('resize', check); window.removeEventListener('orientationchange', check); };
   }, [touchUI]);
 
+  const canFullscreen = !!document.documentElement.requestFullscreen;
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || window.matchMedia?.('(display-mode: fullscreen)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  // Phones: go full screen on the first tap of the race (browsers need a tap to allow it).
+  const autoFull = () => {
+    if (touchUI && settings.autoFullscreen && canFullscreen && !document.fullscreenElement && !standalone) void toggleFullscreen();
+  };
   const toggleFullscreen = async () => {
     try {
       if (!document.fullscreenElement) {
@@ -97,7 +112,7 @@ export function Race({ onLeave }: { onLeave: () => void }) {
   const mmss = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
   const hpPct = h ? Math.max(0, Math.min(100, (h.health / Math.max(1, h.maxHealth)) * 100)) : 100;
   return (
-    <div className={`race-root ${touchUI ? 'touch-mode' : ''}`} ref={hostRef} onContextMenu={(e) => e.preventDefault()}>
+    <div className={`race-root ${touchUI ? 'touch-mode' : ''}`} ref={hostRef} onContextMenu={(e) => e.preventDefault()} onPointerDownCapture={autoFull}>
       <div className="hud" style={{ ['--touch-scale' as string]: settings.touchScale }}>
         {h && h.hitFlash > 0 && <div className="hit-flash" style={{ opacity: h.hitFlash }} />}
         <div className="hud-tl">
@@ -135,7 +150,8 @@ export function Race({ onLeave }: { onLeave: () => void }) {
           <div className="stack" style={{ gap: 6 }}>
             <button className="hud-btn" aria-label="Pause" onClick={() => setPaused(true)}>❚❚</button>
             <VoiceHud names={new Map((h?.leaderboard ?? []).map((r) => [r.id, r.me ? 'You' : r.name]))} />
-            {!touchUI && <button className="hud-btn" aria-label="Recover car" title="Recover (R)" onPointerDown={() => input.pointerDown(-99, 'recover')} onPointerUp={() => input.pointerUp(-99)} onPointerLeave={() => input.pointerUp(-99)}>⟲</button>}
+            <button className="hud-btn" aria-label="Recover car" title="Recover (R)" onPointerDown={() => input.pointerDown(-99, 'recover')} onPointerUp={() => input.pointerUp(-99)} onPointerLeave={() => input.pointerUp(-99)}>⟲</button>
+            {touchUI && canFullscreen && !standalone && <button className="hud-btn" aria-label={isFull ? 'Exit full screen' : 'Full screen'} onClick={() => void toggleFullscreen()}>{isFull ? '⤡' : '⛶'}</button>}
           </div>
         </div>
         <div className="hud-bl hud-panel">
@@ -208,7 +224,9 @@ export function Race({ onLeave }: { onLeave: () => void }) {
         {settings.showFps && <div className="fps">{h?.fps ?? 0} fps</div>}
       </div>
 
-      {touchUI && !paused && <TouchControls disabledFire={h?.weaponsOn === false} disabledNitro={h?.nitroOn === false} />}
+      {touchUI && (!paused || editingControls) && (
+        <TouchControls weaponsOn={h?.weaponsOn !== false} nitroOn={h?.nitroOn !== false} editing={editingControls} onDoneEditing={() => { setEditingControls(false); setPaused(false); }} />
+      )}
 
       {portrait && (
         <div className="rotate-overlay">
@@ -220,7 +238,7 @@ export function Race({ onLeave }: { onLeave: () => void }) {
         </div>
       )}
 
-      {(paused || showSettings) && !portrait && (
+      {(paused || showSettings) && !portrait && !editingControls && (
         <div className="overlay">
           {showSettings ? (
             <div className="card modal">
@@ -241,7 +259,9 @@ export function Race({ onLeave }: { onLeave: () => void }) {
               <p className="small muted">The race keeps going for everyone else! Your car coasts while you're paused.</p>
               <Btn variant="primary big" onClick={() => setPaused(false)}>Resume</Btn>
               <Btn onClick={() => setShowSettings(true)}>Settings & controls</Btn>
-              <Btn onClick={toggleFullscreen}>Toggle fullscreen</Btn>
+              {touchUI && <Btn onClick={() => setEditingControls(true)}>Customize on-screen controls</Btn>}
+              {canFullscreen && !standalone && <Btn onClick={toggleFullscreen}>{isFull ? 'Exit full screen' : 'Full screen'}</Btn>}
+              {isIOS && !standalone && <p className="small muted">iPhone tip: tap Share ⬆ then "Add to Home Screen" to play full screen like an app.</p>}
               <Btn variant="danger" onClick={() => setConfirmLeave(true)}>Leave race</Btn>
             </div>
           )}
@@ -261,78 +281,4 @@ function weaponLabel(id: string) {
   const names: Record<string, string> = { ram: 'rammed', wall: 'crashed', fall: 'fell', test: 'zapped' };
   if (names[id]) return names[id];
   return WEAPONS.find((w) => w.id === id)?.label ?? id;
-}
-
-const ICONS: Record<string, JSX.Element> = {
-  left: <svg viewBox="0 0 24 24"><path d="M15 4 7 12l8 8" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
-  right: <svg viewBox="0 0 24 24"><path d="m9 4 8 8-8 8" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>,
-};
-
-function TouchControls({ disabledFire, disabledNitro }: { disabledFire: boolean; disabledNitro: boolean }) {
-  const [down, setDown] = useState<Set<Action>>(new Set());
-  const steerPad = useRef<HTMLDivElement>(null);
-  const refresh = () => {
-    const s = new Set<Action>();
-    for (const a of ['left', 'right', 'accelerate', 'brake', 'drift', 'nitro', 'fire', 'reload', 'nextWeapon', 'recover'] as Action[]) if (input.isDown(a)) s.add(a);
-    setDown(s);
-  };
-  useEffect(() => () => input.resetAll(), []);
-
-  const steerAction = (e: RPointerEvent) => {
-    const r = steerPad.current!.getBoundingClientRect();
-    return e.clientX < r.left + r.width / 2 ? 'left' : 'right';
-  };
-  const release = (e: RPointerEvent) => { input.pointerUp(e.pointerId); refresh(); };
-  const btn = (a: Action, label: string, cls = '', disabled = false) => (
-    <div
-      className={`tbtn ${cls} ${down.has(a) ? 'down' : ''} ${disabled ? 'disabled' : ''}`}
-      role="button"
-      aria-label={label}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        input.pointerDown(e.pointerId, a);
-        if (a === 'fire' || a === 'nitro') haptic(10);
-        refresh();
-      }}
-      onPointerUp={release}
-      onPointerCancel={release}
-      onLostPointerCapture={release}
-    >
-      {label}
-    </div>
-  );
-  return (
-    <div className="touch">
-      <div
-        ref={steerPad}
-        className="pad left-pad"
-        onPointerDown={(e) => {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          input.pointerDown(e.pointerId, steerAction(e));
-          refresh();
-        }}
-        onPointerMove={(e) => {
-          // slide a thumb between left and right without lifting it
-          input.pointerMove(e.pointerId, steerAction(e));
-          refresh();
-        }}
-        onPointerUp={release}
-        onPointerCancel={release}
-        onLostPointerCapture={release}
-      >
-        <div className={`tbtn steer ${down.has('left') ? 'down' : ''}`} aria-label="Steer left">{ICONS.left}</div>
-        <div className={`tbtn steer ${down.has('right') ? 'down' : ''}`} aria-label="Steer right">{ICONS.right}</div>
-      </div>
-      <div className="pad right-pad">
-        {btn('nitro', 'NITRO', 'small', disabledNitro)}
-        {btn('fire', 'FIRE', '', disabledFire)}
-        {btn('accelerate', 'GAS', 'gas')}
-        {btn('drift', 'DRIFT', 'small')}
-        {btn('brake', 'BRAKE')}
-      </div>
-      <div className="top-right-actions">{!disabledFire && btn('nextWeapon', 'GUN ▸', 'small')}{!disabledFire && btn('reload', 'RELOAD', 'small')}{btn('recover', '⟲', 'small')}</div>
-    </div>
-  );
 }

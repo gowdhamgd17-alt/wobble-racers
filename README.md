@@ -56,18 +56,20 @@ npm run bots -w server -- ABCDE 3      # 3 bots join room ABCDE and ready up
 
 ## Controls
 
+On phones the game runs full screen (it switches on your first tap; on iPhone use Share → Add to Home Screen) and can be installed as an app from the home screen's *Install as app* button. On-screen controls are ◀ ▶ steer, ▲ forward, ▼ brake / reverse, FIRE and NITRO, plus smaller DRIFT, GUN and RELOAD buttons. **Pause → Customize on-screen controls** lets you drag every button anywhere and resize it; the layout is saved on the phone. Voice chat on phones is tap to talk (tap the mic again to stop).
+
 | Action | Keyboard (rebindable in Settings) | Touch |
 |---|---|---|
-| Accelerate | W / ↑ | GAS (right) |
-| Brake / reverse | S / ↓ | BRAKE |
-| Steer | A D / ← → | Left/right pads (slide your thumb between them) |
+| Accelerate | W / ↑ | ▲ |
+| Brake / reverse | S / ↓ | ▼ |
+| Steer | A D / ← → | ◀ ▶ (slide your thumb between them) |
 | Handbrake / drift | Space | DRIFT |
 | Nitro | Shift | NITRO |
 | Fire weapon | F (or J) | FIRE |
 | Reload | R | RELOAD |
 | Switch gun | 1–9, 0 pick a gun · Q / E previous / next · or click the gun bar | GUN ▸ (or tap the gun bar) |
 | Recover stuck car | R (only acts when stuck or flipped) | ⟲ |
-| Push to talk (voice chat) | V | 🎤 (hold) |
+| Push to talk (voice chat) | V | 🎤 (tap to talk, tap again to stop) |
 | Pause | Esc / P | ❚❚ |
 
 The control scheme is chosen automatically from the input you used last, so touch laptops can switch between keyboard and touch without a reload. Settings lets you force a mode, resize touch buttons, turn on auto-gas, adjust camera follow speed, graphics quality and separate SFX / music volumes. Phones play in landscape; in portrait a rotate prompt appears and your car coasts.

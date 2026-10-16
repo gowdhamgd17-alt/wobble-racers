@@ -7,6 +7,19 @@ export type HomeAction = 'practice' | 'battle' | 'play' | 'quick' | 'create' | '
 export function Home({ name, onAction, busy }: { name: string; onAction: (a: HomeAction) => void; busy: boolean }) {
   const title = 'WOBBLE RACERS';
   const [serverOk, setServerOk] = useState<boolean | null>(null);
+  const [installable, setInstallable] = useState(() => !!(window as unknown as { __installPrompt?: Event }).__installPrompt);
+  useEffect(() => {
+    const on = () => setInstallable(true);
+    window.addEventListener('wobble-installable', on);
+    return () => window.removeEventListener('wobble-installable', on);
+  }, []);
+  const install = async () => {
+    const p = (window as unknown as { __installPrompt?: { prompt: () => Promise<void> } }).__installPrompt;
+    if (!p) return;
+    await p.prompt().catch(() => {});
+    (window as unknown as { __installPrompt?: Event }).__installPrompt = undefined;
+    setInstallable(false);
+  };
   useEffect(() => {
     let alive = true;
     const run = () => checkServer().then((ok) => { if (alive) setServerOk(ok); });
@@ -49,6 +62,7 @@ export function Home({ name, onAction, busy }: { name: string; onAction: (a: Hom
           <Btn variant="ghost" onClick={() => onAction('garage')}>Garage</Btn>
           <Btn variant="ghost" onClick={() => onAction('character')}>Characters</Btn>
           <Btn variant="ghost" onClick={() => onAction('settings')}>Settings</Btn>
+          {installable && <Btn variant="ghost wide" onClick={() => void install()}>📲 Install as app (full screen)</Btn>}
         </div>
         <p className="muted small" style={{ textAlign: 'center' }}>
           Desktop: <span className="kbd">W A S D</span> drive · <span className="kbd">Space</span> drift · <span className="kbd">Shift</span> nitro · <span className="kbd">F</span> fire · <span className="kbd">R</span> reload · <span className="kbd">1</span>–<span className="kbd">0</span> / <span className="kbd">Q</span> <span className="kbd">E</span> switch gun. Phones & tablets get touch controls.

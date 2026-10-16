@@ -179,6 +179,12 @@ class VoiceChat {
     this.pttHeld.add(source);
     this.setPtt(true);
   }
+  /** Tap-to-talk (phones): first tap opens the mic, next tap closes it. */
+  toggleTalk() {
+    if (this.mode === 'open') { this.setMode('ptt'); this.pttHeld.clear(); this.setPtt(false); return; }
+    if (this.pttHeld.has('tap')) this.pttEnd('tap');
+    else this.pttStart('tap');
+  }
   pttEnd(source = 'button') {
     this.pttHeld.delete(source);
     if (!this.pttHeld.size) this.setPtt(false);
